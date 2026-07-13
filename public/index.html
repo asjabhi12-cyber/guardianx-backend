@@ -5,75 +5,314 @@
 <title>GuardianX - Parent Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f5f6fa; }
-  header { background: #2c3e50; color: white; padding: 16px 24px; }
-  header h1 { margin: 0; font-size: 20px; }
-  .container { display: flex; height: calc(100vh - 60px); }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, Segoe UI, Roboto, sans-serif;
+    margin: 0;
+    background: #f4f6fb;
+    color: #1a1f2b;
+  }
+
+  /* ---------- Login screen ---------- */
+  #loginScreen {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1a2332 0%, #2c3e50 100%);
+  }
+  .login-box {
+    background: white;
+    border-radius: 16px;
+    padding: 40px 36px;
+    width: 340px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    text-align: center;
+  }
+  .login-logo {
+    width: 64px; height: 64px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #3498db, #2c3e50);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px;
+    margin: 0 auto 16px;
+  }
+  .login-box h1 { font-size: 20px; margin: 0 0 4px; font-weight: 800; }
+  .login-box p { font-size: 13px; color: #8a94a6; margin: 0 0 24px; }
+  .login-box input {
+    width: 100%; padding: 12px 14px; border-radius: 10px;
+    border: 1.5px solid #e3e7ee; font-size: 14px; margin-bottom: 12px;
+    font-family: inherit; outline: none; transition: border-color .15s;
+  }
+  .login-box input:focus { border-color: #3498db; }
+  .login-box button {
+    width: 100%; padding: 12px; border-radius: 10px; border: none;
+    background: #2c3e50; color: white; font-weight: 700; font-size: 14px;
+    cursor: pointer; font-family: inherit; transition: background .15s;
+  }
+  .login-box button:hover { background: #1a2634; }
+  .login-error { color: #e74c3c; font-size: 12px; margin-top: 10px; min-height: 16px; }
+
+  /* ---------- Main dashboard ---------- */
+  #dashboard { display: none; height: 100vh; flex-direction: column; }
+  header {
+    background: #1a2332;
+    color: white;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: linear-gradient(135deg, #3498db, #2c3e50);
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: .2px; }
+  header .sub { font-size: 11px; color: #8a94a6; margin-top: 1px; }
+  .logout-btn {
+    background: rgba(255,255,255,0.08); border: none; color: #cfd6e3;
+    padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;
+    font-family: inherit; font-weight: 600;
+  }
+  .logout-btn:hover { background: rgba(255,255,255,0.15); }
+
+  .container { display: flex; flex: 1; overflow: hidden; }
   #map { flex: 1; }
-  .sidebar { width: 320px; background: white; padding: 16px; overflow-y: auto; border-right: 1px solid #ddd; }
-  .device-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer; }
-  .device-card:hover { background: #f0f4ff; }
-  .device-card h3 { margin: 0 0 4px; font-size: 15px; }
-  .device-card p { margin: 2px 0; font-size: 12px; color: #666; }
-  .pair-box { background: #eef5ff; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-  .pair-box input, .pair-box button { padding: 8px; margin-top: 6px; width: 100%; box-sizing: border-box; }
-  .pair-box button { background: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; }
-  .code-display { font-size: 24px; font-weight: bold; text-align: center; margin-top: 8px; letter-spacing: 4px; color: #2c3e50; }
+
+  .sidebar {
+    width: 340px;
+    background: white;
+    padding: 18px;
+    overflow-y: auto;
+    border-right: 1px solid #eaedf3;
+    flex-shrink: 0;
+  }
+  .section-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .6px; color: #9aa4b5; margin: 18px 0 10px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  .pair-box {
+    background: linear-gradient(135deg, #eef5ff, #f4f8ff);
+    border: 1px solid #dde9fb;
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .pair-box input {
+    padding: 10px 12px; margin-top: 8px; width: 100%;
+    border-radius: 9px; border: 1.5px solid #d8e2f0; font-size: 13px;
+    font-family: inherit; outline: none;
+  }
+  .pair-box button {
+    margin-top: 10px; padding: 10px; width: 100%;
+    background: #2c3e50; color: white; border: none; border-radius: 9px;
+    cursor: pointer; font-weight: 700; font-size: 13px; font-family: inherit;
+  }
+  .pair-box button:hover { background: #1a2634; }
+  .code-display {
+    font-size: 26px; font-weight: 800; text-align: center; margin-top: 12px;
+    letter-spacing: 6px; color: #2c3e50; background: white;
+    border-radius: 9px; padding: 10px; border: 1px dashed #b8c7e0;
+  }
+
+  .device-card {
+    border: 1px solid #eaedf3; border-radius: 12px; padding: 13px;
+    margin-bottom: 10px; cursor: pointer; transition: all .15s;
+    background: white;
+  }
+  .device-card:hover { border-color: #c5d8f2; box-shadow: 0 2px 10px rgba(52,152,219,0.08); }
+  .device-card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .device-card h3 { margin: 0 0 3px; font-size: 14px; font-weight: 700; }
+  .device-card p { margin: 2px 0; font-size: 11.5px; color: #8a94a6; }
+  .device-status-dot {
+    width: 8px; height: 8px; border-radius: 4px; display: inline-block;
+    margin-right: 5px; background: #bbb;
+  }
+  .device-status-dot.online { background: #2ecc71; }
+  .device-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .device-actions button {
+    flex: 1; font-size: 11px; padding: 6px; border-radius: 7px; border: none;
+    cursor: pointer; font-family: inherit; font-weight: 600;
+  }
+  .btn-rename { background: #eef2f7; color: #4a5568; }
+  .btn-rename:hover { background: #e1e7ee; }
+  .btn-remove { background: #fdecea; color: #e74c3c; }
+  .btn-remove:hover { background: #fbdad7; }
+
+  .empty-state { text-align: center; color: #b0b8c5; font-size: 12.5px; padding: 30px 10px; }
 </style>
 </head>
 <body>
-<header><h1>👨‍👩‍👧 GuardianX - Dashboard</h1></header>
-<div class="container">
-  <div class="sidebar">
-    <div class="pair-box">
-      <b>Naya device jodo (Pair)</b>
-      <input type="text" id="deviceLabel" placeholder="Naam daalein (jaise: Rahul ka phone)" />
-      <button onclick="createPairCode()">Pairing Code Banao</button>
-      <div class="code-display" id="codeDisplay"></div>
-    </div>
-    <b>Paired Devices</b>
-    <div id="deviceList"></div>
+
+<!-- ===== Login Screen ===== -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">🛡️</div>
+    <h1>GuardianX Dashboard</h1>
+    <p>Aage badhne ke liye password daalein</p>
+    <input type="password" id="passwordInput" placeholder="Password" onkeydown="if(event.key==='Enter') doLogin()" />
+    <button onclick="doLogin()">Login</button>
+    <div class="login-error" id="loginError"></div>
   </div>
-  <div id="map"></div>
+</div>
+
+<!-- ===== Main Dashboard ===== -->
+<div id="dashboard">
+  <header>
+    <div class="brand">
+      <div class="brand-icon">🛡️</div>
+      <div>
+        <h1>GuardianX</h1>
+        <div class="sub">Parent Dashboard</div>
+      </div>
+    </div>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </header>
+
+  <div class="container">
+    <div class="sidebar">
+      <div class="section-label">Naya device jodein</div>
+      <div class="pair-box">
+        <input type="text" id="deviceLabel" placeholder="Naam daalein (jaise: Rahul ka phone)" />
+        <button onclick="createPairCode()">Pairing Code Banao</button>
+        <div class="code-display" id="codeDisplay" style="display:none;"></div>
+      </div>
+
+      <div class="section-label">Paired Devices</div>
+      <div id="deviceList"></div>
+    </div>
+    <div id="map"></div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-  const map = L.map('map').setView([20.5937, 78.9629], 5);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+  let dashboardPassword = sessionStorage.getItem('gx_pw') || '';
+  let map, markers = {};
 
-  let markers = {};
+  async function doLogin() {
+    const pw = document.getElementById('passwordInput').value;
+    const errEl = document.getElementById('loginError');
+    errEl.innerText = '';
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        dashboardPassword = pw;
+        sessionStorage.setItem('gx_pw', pw);
+        showDashboard();
+      } else {
+        errEl.innerText = 'Galat password, dobara try karein.';
+      }
+    } catch (e) {
+      errEl.innerText = 'Connection error. Dobara try karein.';
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem('gx_pw');
+    dashboardPassword = '';
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('loginScreen').style.display = 'flex';
+  }
+
+  function authHeaders() {
+    return { 'Content-Type': 'application/json', 'x-dashboard-password': dashboardPassword };
+  }
+
+  function showDashboard() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'flex';
+    if (!map) initMap();
+    loadDevices();
+    setInterval(loadDevices, 15000);
+  }
+
+  function initMap() {
+    map = L.map('map').setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+  }
 
   async function createPairCode() {
     const label = document.getElementById('deviceLabel').value || 'Unnamed device';
     const res = await fetch('/api/pair/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ deviceLabel: label })
     });
+    if (res.status === 401) { logout(); return; }
     const data = await res.json();
-    document.getElementById('codeDisplay').innerText = data.code;
+    const codeEl = document.getElementById('codeDisplay');
+    codeEl.style.display = 'block';
+    codeEl.innerText = data.code;
+  }
+
+  async function renameDevice(deviceId, currentLabel) {
+    const newLabel = prompt('Naya naam daalein:', currentLabel);
+    if (!newLabel) return;
+    await fetch('/api/devices/' + deviceId, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ deviceLabel: newLabel })
+    });
+    loadDevices();
+  }
+
+  async function removeDevice(deviceId, label) {
+    if (!confirm(`"${label}" ko remove karein? Iska pura location history bhi delete ho jayega.`)) return;
+    await fetch('/api/devices/' + deviceId, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+    if (markers[deviceId]) {
+      map.removeLayer(markers[deviceId]);
+      delete markers[deviceId];
+    }
+    loadDevices();
   }
 
   async function loadDevices() {
-    const res = await fetch('/api/devices');
+    const res = await fetch('/api/devices', { headers: authHeaders() });
+    if (res.status === 401) { logout(); return; }
     const devices = await res.json();
     const listEl = document.getElementById('deviceList');
     listEl.innerHTML = '';
 
+    if (devices.length === 0) {
+      listEl.innerHTML = '<div class="empty-state">Abhi koi device paired nahi hai.<br/>Upar se pairing code banayein.</div>';
+      return;
+    }
+
     devices.forEach(d => {
+      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000; // 20 min threshold
+      const lastSeenStr = d.lastSeen ? timeAgo(d.lastSeen) : 'Kabhi nahi';
+
       const card = document.createElement('div');
       card.className = 'device-card';
-      const lastSeenStr = d.lastSeen ? new Date(d.lastSeen).toLocaleString('en-IN') : 'Kabhi nahi';
-      card.innerHTML = `<h3>${d.deviceLabel}</h3><p>Last seen: ${lastSeenStr}</p>`;
-      card.onclick = () => {
-        if (d.lastLocation) {
-          map.setView([d.lastLocation.latitude, d.lastLocation.longitude], 15);
-        }
-      };
+      card.innerHTML = `
+        <div class="device-card-top" onclick="focusDevice('${d.deviceId}')">
+          <div>
+            <h3>${escapeHtml(d.deviceLabel)}</h3>
+            <p><span class="device-status-dot ${isOnline ? 'online' : ''}"></span>${isOnline ? 'Active' : 'Last seen: ' + lastSeenStr}</p>
+          </div>
+        </div>
+        <div class="device-actions">
+          <button class="btn-rename" onclick="event.stopPropagation(); renameDevice('${d.deviceId}', '${escapeHtml(d.deviceLabel)}')">✏️ Rename</button>
+          <button class="btn-remove" onclick="event.stopPropagation(); removeDevice('${d.deviceId}', '${escapeHtml(d.deviceLabel)}')">🗑️ Remove</button>
+        </div>
+      `;
       listEl.appendChild(card);
 
       if (d.lastLocation) {
@@ -87,8 +326,36 @@
     });
   }
 
-  loadDevices();
-  setInterval(loadDevices, 15000);
+  function focusDevice(deviceId) {
+    if (markers[deviceId]) {
+      map.setView(markers[deviceId].getLatLng(), 15);
+      markers[deviceId].openPopup();
+    }
+  }
+
+  function timeAgo(ts) {
+    const diffMin = Math.floor((Date.now() - ts) / 60000);
+    if (diffMin < 1) return 'abhi abhi';
+    if (diffMin < 60) return diffMin + ' min pehle';
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return diffHr + ' ghante pehle';
+    return Math.floor(diffHr / 24) + ' din pehle';
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Agar pehle se login ho, seedha dashboard dikhao
+  if (dashboardPassword) {
+    fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: dashboardPassword })
+    }).then(r => r.json()).then(d => {
+      if (d.ok) showDashboard();
+    });
+  }
 </script>
 </body>
 </html>
