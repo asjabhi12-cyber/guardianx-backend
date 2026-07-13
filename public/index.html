@@ -2,7 +2,7 @@
 <html lang="hi">
 <head>
 <meta charset="UTF-8" />
-<title>Family Locator - Parent Dashboard</title>
+<title>GuardianX - Parent Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
@@ -23,7 +23,7 @@
 </style>
 </head>
 <body>
-<header><h1>👨‍👩‍👧 Family Locator - Dashboard</h1></header>
+<header><h1>👨‍👩‍👧 GuardianX - Dashboard</h1></header>
 <div class="container">
   <div class="sidebar">
     <div class="pair-box">
@@ -40,7 +40,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-  const map = L.map('map').setView([20.5937, 78.9629], 5); // India center default
+  const map = L.map('map').setView([20.5937, 78.9629], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
@@ -88,7 +88,7 @@
   }
 
   loadDevices();
-  setInterval(loadDevices, 15000); // auto-refresh every 15s
+  setInterval(loadDevices, 15000);
 </script>
 </body>
 </html>
