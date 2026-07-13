@@ -3,17 +3,19 @@
 <head>
 <meta charset="UTF-8" />
 <title>GuardianX - Parent Dashboard</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; }
-  body {
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
     font-family: 'Inter', -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 0;
     background: #f4f6fb;
     color: #1a1f2b;
+    height: 100%;
+    overscroll-behavior: none;
   }
 
   /* ---------- Login screen ---------- */
@@ -23,78 +25,84 @@
     align-items: center;
     justify-content: center;
     background: linear-gradient(135deg, #1a2332 0%, #2c3e50 100%);
+    padding: 20px;
   }
   .login-box {
     background: white;
     border-radius: 16px;
-    padding: 40px 36px;
-    width: 340px;
+    padding: 36px 28px;
+    width: 100%;
+    max-width: 340px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.3);
     text-align: center;
   }
   .login-logo {
-    width: 64px; height: 64px;
+    width: 60px; height: 60px;
     border-radius: 16px;
     background: linear-gradient(135deg, #3498db, #2c3e50);
     display: flex; align-items: center; justify-content: center;
-    font-size: 30px;
+    font-size: 28px;
     margin: 0 auto 16px;
   }
-  .login-box h1 { font-size: 20px; margin: 0 0 4px; font-weight: 800; }
-  .login-box p { font-size: 13px; color: #8a94a6; margin: 0 0 24px; }
+  .login-box h1 { font-size: 19px; margin: 0 0 4px; font-weight: 800; }
+  .login-box p { font-size: 13px; color: #8a94a6; margin: 0 0 22px; }
   .login-box input {
-    width: 100%; padding: 12px 14px; border-radius: 10px;
-    border: 1.5px solid #e3e7ee; font-size: 14px; margin-bottom: 12px;
+    width: 100%; padding: 13px 14px; border-radius: 10px;
+    border: 1.5px solid #e3e7ee; font-size: 16px; margin-bottom: 12px;
     font-family: inherit; outline: none; transition: border-color .15s;
   }
   .login-box input:focus { border-color: #3498db; }
   .login-box button {
-    width: 100%; padding: 12px; border-radius: 10px; border: none;
-    background: #2c3e50; color: white; font-weight: 700; font-size: 14px;
+    width: 100%; padding: 13px; border-radius: 10px; border: none;
+    background: #2c3e50; color: white; font-weight: 700; font-size: 15px;
     cursor: pointer; font-family: inherit; transition: background .15s;
   }
-  .login-box button:hover { background: #1a2634; }
+  .login-box button:active { background: #1a2634; }
   .login-error { color: #e74c3c; font-size: 12px; margin-top: 10px; min-height: 16px; }
 
-  /* ---------- Main dashboard ---------- */
+  /* ---------- Main dashboard (desktop-first, overridden for mobile below) ---------- */
   #dashboard { display: none; height: 100vh; flex-direction: column; }
   header {
     background: #1a2332;
     color: white;
-    padding: 14px 24px;
+    padding: 12px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
+    z-index: 20;
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-icon {
-    width: 34px; height: 34px; border-radius: 9px;
+    width: 32px; height: 32px; border-radius: 8px;
     background: linear-gradient(135deg, #3498db, #2c3e50);
-    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+    flex-shrink: 0;
   }
-  header h1 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: .2px; }
-  header .sub { font-size: 11px; color: #8a94a6; margin-top: 1px; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: .2px; }
+  header .sub { font-size: 10.5px; color: #8a94a6; margin-top: 1px; }
   .logout-btn {
     background: rgba(255,255,255,0.08); border: none; color: #cfd6e3;
-    padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;
-    font-family: inherit; font-weight: 600;
+    padding: 8px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;
+    font-family: inherit; font-weight: 600; flex-shrink: 0;
   }
-  .logout-btn:hover { background: rgba(255,255,255,0.15); }
+  .logout-btn:active { background: rgba(255,255,255,0.2); }
 
-  .container { display: flex; flex: 1; overflow: hidden; }
-  #map { flex: 1; }
+  .container { display: flex; flex: 1; overflow: hidden; position: relative; }
+  #map { flex: 1; z-index: 1; }
 
   .sidebar {
     width: 340px;
     background: white;
-    padding: 18px;
+    padding: 16px;
     overflow-y: auto;
     border-right: 1px solid #eaedf3;
     flex-shrink: 0;
+    -webkit-overflow-scrolling: touch;
   }
   .section-label {
     font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .6px; color: #9aa4b5; margin: 18px 0 10px;
+    letter-spacing: .6px; color: #9aa4b5; margin: 16px 0 10px;
   }
   .section-label:first-child { margin-top: 0; }
 
@@ -102,19 +110,19 @@
     background: linear-gradient(135deg, #eef5ff, #f4f8ff);
     border: 1px solid #dde9fb;
     border-radius: 14px;
-    padding: 16px;
+    padding: 14px;
   }
   .pair-box input {
-    padding: 10px 12px; margin-top: 8px; width: 100%;
-    border-radius: 9px; border: 1.5px solid #d8e2f0; font-size: 13px;
+    padding: 11px 12px; margin-top: 8px; width: 100%;
+    border-radius: 9px; border: 1.5px solid #d8e2f0; font-size: 15px;
     font-family: inherit; outline: none;
   }
   .pair-box button {
-    margin-top: 10px; padding: 10px; width: 100%;
+    margin-top: 10px; padding: 11px; width: 100%;
     background: #2c3e50; color: white; border: none; border-radius: 9px;
-    cursor: pointer; font-weight: 700; font-size: 13px; font-family: inherit;
+    cursor: pointer; font-weight: 700; font-size: 14px; font-family: inherit;
   }
-  .pair-box button:hover { background: #1a2634; }
+  .pair-box button:active { background: #1a2634; }
   .code-display {
     font-size: 26px; font-weight: 800; text-align: center; margin-top: 12px;
     letter-spacing: 6px; color: #2c3e50; background: white;
@@ -126,26 +134,110 @@
     margin-bottom: 10px; cursor: pointer; transition: all .15s;
     background: white;
   }
-  .device-card:hover { border-color: #c5d8f2; box-shadow: 0 2px 10px rgba(52,152,219,0.08); }
+  .device-card:active { border-color: #c5d8f2; background: #f8fbff; }
   .device-card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-  .device-card h3 { margin: 0 0 3px; font-size: 14px; font-weight: 700; }
-  .device-card p { margin: 2px 0; font-size: 11.5px; color: #8a94a6; }
+  .device-card h3 { margin: 0 0 3px; font-size: 14.5px; font-weight: 700; }
+  .device-card p { margin: 2px 0; font-size: 12px; color: #8a94a6; }
   .device-status-dot {
     width: 8px; height: 8px; border-radius: 4px; display: inline-block;
     margin-right: 5px; background: #bbb;
   }
   .device-status-dot.online { background: #2ecc71; }
-  .device-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .device-actions { display: flex; gap: 6px; margin-top: 9px; }
   .device-actions button {
-    flex: 1; font-size: 11px; padding: 6px; border-radius: 7px; border: none;
+    flex: 1; font-size: 12px; padding: 9px 6px; border-radius: 8px; border: none;
     cursor: pointer; font-family: inherit; font-weight: 600;
   }
   .btn-rename { background: #eef2f7; color: #4a5568; }
-  .btn-rename:hover { background: #e1e7ee; }
+  .btn-rename:active { background: #dde3ea; }
   .btn-remove { background: #fdecea; color: #e74c3c; }
-  .btn-remove:hover { background: #fbdad7; }
+  .btn-remove:active { background: #f8cfc9; }
 
   .empty-state { text-align: center; color: #b0b8c5; font-size: 12.5px; padding: 30px 10px; }
+
+  /* ---------- Mobile-only controls (hidden on desktop) ---------- */
+  .mobile-fab {
+    display: none;
+    position: absolute;
+    bottom: 20px;
+    right: 16px;
+    z-index: 15;
+    background: #2c3e50;
+    color: white;
+    border: none;
+    border-radius: 30px;
+    padding: 13px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: inherit;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    align-items: center;
+    gap: 8px;
+  }
+  .mobile-fab .badge {
+    background: #3498db;
+    color: white;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .sheet-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 30;
+  }
+  .sheet-close {
+    display: none;
+    width: 100%;
+    text-align: center;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #3498db;
+    background: none;
+    border: none;
+    font-family: inherit;
+  }
+  .sheet-handle {
+    display: none;
+    width: 40px; height: 4px; border-radius: 2px;
+    background: #d5dae2; margin: 8px auto 4px;
+  }
+
+  /* ================= MOBILE LAYOUT ================= */
+  @media (max-width: 768px) {
+    header h1 { font-size: 14px; }
+    header .sub { display: none; }
+
+    .container { flex-direction: column; }
+    #map { position: absolute; inset: 0; }
+
+    .mobile-fab { display: flex; }
+
+    .sidebar {
+      display: none;
+      width: 100%;
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      top: auto;
+      max-height: 82vh;
+      border-radius: 20px 20px 0 0;
+      border-right: none;
+      box-shadow: 0 -8px 30px rgba(0,0,0,0.2);
+      z-index: 40;
+      padding-top: 4px;
+    }
+    .sidebar.open { display: block; }
+    .sheet-handle { display: block; }
+    .sheet-backdrop.open { display: block; }
+
+    .device-actions button { padding: 11px 6px; font-size: 13px; }
+    .pair-box input, .pair-box button { font-size: 16px; padding: 13px; }
+
+    .login-box { padding: 30px 22px; }
+  }
 </style>
 </head>
 <body>
@@ -156,7 +248,7 @@
     <div class="login-logo">🛡️</div>
     <h1>GuardianX Dashboard</h1>
     <p>Aage badhne ke liye password daalein</p>
-    <input type="password" id="passwordInput" placeholder="Password" onkeydown="if(event.key==='Enter') doLogin()" />
+    <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()" />
     <button onclick="doLogin()">Login</button>
     <div class="login-error" id="loginError"></div>
   </div>
@@ -176,7 +268,13 @@
   </header>
 
   <div class="container">
-    <div class="sidebar">
+    <div id="map"></div>
+
+    <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeSheet()"></div>
+
+    <div class="sidebar" id="sidebar">
+      <div class="sheet-handle"></div>
+
       <div class="section-label">Naya device jodein</div>
       <div class="pair-box">
         <input type="text" id="deviceLabel" placeholder="Naam daalein (jaise: Rahul ka phone)" />
@@ -186,8 +284,13 @@
 
       <div class="section-label">Paired Devices</div>
       <div id="deviceList"></div>
+
+      <button class="sheet-close" onclick="closeSheet()">Band Karein ✕</button>
     </div>
-    <div id="map"></div>
+
+    <button class="mobile-fab" id="mobileFab" onclick="openSheet()">
+      📍 Devices <span class="badge" id="deviceCountBadge">0</span>
+    </button>
   </div>
 </div>
 
@@ -235,7 +338,18 @@
     document.getElementById('dashboard').style.display = 'flex';
     if (!map) initMap();
     loadDevices();
+    // Mobile par pehli baar khulte hi sheet dikha dete hain
+    if (window.innerWidth <= 768) openSheet();
     setInterval(loadDevices, 15000);
+  }
+
+  function openSheet() {
+    document.getElementById('sidebar').classList.add('open');
+    document.getElementById('sheetBackdrop').classList.add('open');
+  }
+  function closeSheet() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sheetBackdrop').classList.remove('open');
   }
 
   function initMap() {
@@ -290,13 +404,15 @@
     const listEl = document.getElementById('deviceList');
     listEl.innerHTML = '';
 
+    document.getElementById('deviceCountBadge').innerText = devices.length;
+
     if (devices.length === 0) {
       listEl.innerHTML = '<div class="empty-state">Abhi koi device paired nahi hai.<br/>Upar se pairing code banayein.</div>';
       return;
     }
 
     devices.forEach(d => {
-      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000; // 20 min threshold
+      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000;
       const lastSeenStr = d.lastSeen ? timeAgo(d.lastSeen) : 'Kabhi nahi';
 
       const card = document.createElement('div');
@@ -330,6 +446,7 @@
     if (markers[deviceId]) {
       map.setView(markers[deviceId].getLatLng(), 15);
       markers[deviceId].openPopup();
+      if (window.innerWidth <= 768) closeSheet();
     }
   }
 
@@ -346,7 +463,6 @@
     return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  // Agar pehle se login ho, seedha dashboard dikhao
   if (dashboardPassword) {
     fetch('/api/login', {
       method: 'POST',
