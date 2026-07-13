@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8" />
+<title>Family Locator - Parent Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f5f6fa; }
+  header { background: #2c3e50; color: white; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .container { display: flex; height: calc(100vh - 60px); }
+  #map { flex: 1; }
+  .sidebar { width: 320px; background: white; padding: 16px; overflow-y: auto; border-right: 1px solid #ddd; }
+  .device-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer; }
+  .device-card:hover { background: #f0f4ff; }
+  .device-card h3 { margin: 0 0 4px; font-size: 15px; }
+  .device-card p { margin: 2px 0; font-size: 12px; color: #666; }
+  .pair-box { background: #eef5ff; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+  .pair-box input, .pair-box button { padding: 8px; margin-top: 6px; width: 100%; box-sizing: border-box; }
+  .pair-box button { background: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; }
+  .code-display { font-size: 24px; font-weight: bold; text-align: center; margin-top: 8px; letter-spacing: 4px; color: #2c3e50; }
+</style>
+</head>
+<body>
+<header><h1>👨‍👩‍👧 Family Locator - Dashboard</h1></header>
+<div class="container">
+  <div class="sidebar">
+    <div class="pair-box">
+      <b>Naya device jodo (Pair)</b>
+      <input type="text" id="deviceLabel" placeholder="Naam daalein (jaise: Rahul ka phone)" />
+      <button onclick="createPairCode()">Pairing Code Banao</button>
+      <div class="code-display" id="codeDisplay"></div>
+    </div>
+    <b>Paired Devices</b>
+    <div id="deviceList"></div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const map = L.map('map').setView([20.5937, 78.9629], 5); // India center default
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  let markers = {};
+
+  async function createPairCode() {
+    const label = document.getElementById('deviceLabel').value || 'Unnamed device';
+    const res = await fetch('/api/pair/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceLabel: label })
+    });
+    const data = await res.json();
+    document.getElementById('codeDisplay').innerText = data.code;
+  }
+
+  async function loadDevices() {
+    const res = await fetch('/api/devices');
+    const devices = await res.json();
+    const listEl = document.getElementById('deviceList');
+    listEl.innerHTML = '';
+
+    devices.forEach(d => {
+      const card = document.createElement('div');
+      card.className = 'device-card';
+      const lastSeenStr = d.lastSeen ? new Date(d.lastSeen).toLocaleString('en-IN') : 'Kabhi nahi';
+      card.innerHTML = `<h3>${d.deviceLabel}</h3><p>Last seen: ${lastSeenStr}</p>`;
+      card.onclick = () => {
+        if (d.lastLocation) {
+          map.setView([d.lastLocation.latitude, d.lastLocation.longitude], 15);
+        }
+      };
+      listEl.appendChild(card);
+
+      if (d.lastLocation) {
+        const pos = [d.lastLocation.latitude, d.lastLocation.longitude];
+        if (markers[d.deviceId]) {
+          markers[d.deviceId].setLatLng(pos);
+        } else {
+          markers[d.deviceId] = L.marker(pos).addTo(map).bindPopup(d.deviceLabel);
+        }
+      }
+    });
+  }
+
+  loadDevices();
+  setInterval(loadDevices, 15000); // auto-refresh every 15s
+</script>
+</body>
+</html>
