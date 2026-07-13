@@ -1,18 +1,20 @@
 /**
- * Family Locator - Backend Server
+ * GuardianX - Backend Server
  * ---------------------------------
  * Simple, transparent parental location-tracking backend.
  *
  * Endpoints:
- *   POST /api/pair/create        -> parent creates a pairing code for a child device
- *   POST /api/pair/claim         -> child app claims a pairing code, gets a deviceToken
- *   POST /api/location           -> child app sends a location ping (needs deviceToken)
- *   GET  /api/devices            -> parent dashboard: list of paired devices
+ *   POST /api/login               -> parent dashboard login (password check)
+ *   POST /api/pair/create         -> parent creates a pairing code for a child device
+ *   POST /api/pair/claim          -> child app claims a pairing code, gets a deviceToken
+ *   POST /api/location            -> child app sends a location ping (needs deviceToken)
+ *   GET  /api/devices             -> parent dashboard: list of paired devices (needs dashboard password)
  *   GET  /api/devices/:id/history -> parent dashboard: location history of one device
- *   GET  /                       -> live map dashboard (open in browser)
+ *   PATCH /api/devices/:id        -> rename a device
+ *   DELETE /api/devices/:id       -> remove a device + its history
+ *   GET  /                        -> live map dashboard (open in browser)
  *
  * Storage: simple JSON file (data.json) - fine for a family-scale app.
- * For production with many users, swap this for a real database.
  */
 
 const express = require("express");
@@ -24,6 +26,10 @@ const path = require("path");
 
 const DATA_FILE = path.join(__dirname, "data.json");
 const PORT = process.env.PORT || 3000;
+
+// ⚠️ Dashboard password - isse Render ke Environment Variables me DASHBOARD_PASSWORD
+// naam se set karein (recommended), warna ye default use hoga.
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "changeme123";
 
 // ---------- tiny JSON "database" ----------
 function loadData() {
@@ -41,13 +47,31 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+// ---------- Simple dashboard auth middleware ----------
+// Parent dashboard requests must send header: x-dashboard-password
+function requireDashboardAuth(req, res, next) {
+  const pass = req.headers["x-dashboard-password"];
+  if (pass !== DASHBOARD_PASSWORD) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+// ---------- Login check (dashboard calls this first) ----------
+app.post("/api/login", (req, res) => {
+  const { password } = req.body;
+  if (password === DASHBOARD_PASSWORD) {
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ ok: false, error: "Galat password" });
+});
+
 // ---------- 1. Parent creates a pairing code ----------
-// Call this from the parent dashboard before installing the app on the child's phone.
-app.post("/api/pair/create", (req, res) => {
-  const { deviceLabel } = req.body; // e.g. "Rahul's Phone"
+app.post("/api/pair/create", requireDashboardAuth, (req, res) => {
+  const { deviceLabel } = req.body;
   const data = loadData();
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
   data.pairingCodes[code] = {
     deviceLabel: deviceLabel || "Unnamed device",
     createdAt: Date.now(),
@@ -76,6 +100,7 @@ app.post("/api/pair/claim", (req, res) => {
     deviceId,
     deviceToken,
     deviceLabel: entry.deviceLabel,
+    pairedAt: Date.now(),
     lastSeen: null,
     lastLocation: null,
     history: [],
@@ -107,7 +132,6 @@ app.post("/api/location", (req, res) => {
   device.lastLocation = point;
   device.history.push(point);
 
-  // keep last 500 points only, to stop file from growing forever
   if (device.history.length > 500) {
     device.history = device.history.slice(-500);
   }
@@ -117,11 +141,12 @@ app.post("/api/location", (req, res) => {
 });
 
 // ---------- 4. Parent dashboard: list devices ----------
-app.get("/api/devices", (req, res) => {
+app.get("/api/devices", requireDashboardAuth, (req, res) => {
   const data = loadData();
   const list = Object.values(data.devices).map((d) => ({
     deviceId: d.deviceId,
     deviceLabel: d.deviceLabel,
+    pairedAt: d.pairedAt || null,
     lastSeen: d.lastSeen,
     lastLocation: d.lastLocation,
   }));
@@ -129,13 +154,36 @@ app.get("/api/devices", (req, res) => {
 });
 
 // ---------- 5. Parent dashboard: history of one device ----------
-app.get("/api/devices/:id/history", (req, res) => {
+app.get("/api/devices/:id/history", requireDashboardAuth, (req, res) => {
   const data = loadData();
   const device = data.devices[req.params.id];
   if (!device) return res.status(404).json({ error: "Not found" });
   res.json(device.history);
 });
 
+// ---------- 6. Rename a device ----------
+app.patch("/api/devices/:id", requireDashboardAuth, (req, res) => {
+  const { deviceLabel } = req.body;
+  const data = loadData();
+  const device = data.devices[req.params.id];
+  if (!device) return res.status(404).json({ error: "Not found" });
+
+  device.deviceLabel = deviceLabel || device.deviceLabel;
+  saveData(data);
+  res.json({ ok: true });
+});
+
+// ---------- 7. Remove a device (and its location history) ----------
+app.delete("/api/devices/:id", requireDashboardAuth, (req, res) => {
+  const data = loadData();
+  if (!data.devices[req.params.id]) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  delete data.devices[req.params.id];
+  saveData(data);
+  res.json({ ok: true });
+});
+
 app.listen(PORT, () => {
-  console.log(`Family Locator server running at http://localhost:${PORT}`);
+  console.log(`GuardianX server running at http://localhost:${PORT}`);
 });
