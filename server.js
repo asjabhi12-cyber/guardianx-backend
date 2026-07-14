@@ -14,56 +14,87 @@
  *   DELETE /api/devices/:id       -> remove a device + its history
  *   GET  /                        -> live map dashboard (open in browser)
  *
- * Storage: simple JSON file (data.json) - fine for a family-scale app.
+ * Storage: MongoDB Atlas (free tier) - this does NOT depend on the hosting
+ * platform's local filesystem, so it survives every restart/redeploy even
+ * on Render's free instance type (which does not support persistent disks).
  *
- * ⚠️ IMPORTANT (Render / most PaaS hosts):
- * The default filesystem on most hosting platforms is EPHEMERAL - it resets
- * on every restart, redeploy, or scale event. If DATA_DIR is not pointed at
- * a persistent disk, all paired devices and location history will silently
- * disappear whenever the service restarts. This is almost always the cause
- * of "devices/locations keep disappearing on their own".
- *
- * To fix on Render:
- *   1. In the Render dashboard, add a "Disk" to this service (Render ->
- *      your service -> Disks -> Add Disk), mounted at e.g. /var/data.
- *   2. Set an environment variable DATA_DIR=/var/data on the service.
- *   3. Redeploy. From then on, data.json lives on the persistent disk and
- *      survives restarts/redeploys.
+ * Required environment variable:
+ *   MONGODB_URI - your MongoDB Atlas connection string, e.g.
+ *   mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/guardianx?retryWrites=true&w=majority
  */
 
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const { v4: uuidv4 } = require("uuid");
-const fs = require("fs");
 const path = require("path");
+const { MongoClient } = require("mongodb");
 
-// Point this at a persistent disk mount in production (see note above).
-// Defaults to a local "data" folder next to server.js for local dev.
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "data.json");
 const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // ⚠️ Dashboard password - isse Render ke Environment Variables me DASHBOARD_PASSWORD
 // naam se set karein (recommended), warna ye default use hoga.
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "changeme123";
 
-// ---------- tiny JSON "database" ----------
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+// ---------- Reverse geocoding (lat/long -> human-readable address) ----------
+// Uses OpenStreetMap's free Nominatim service. Free tier limits: max ~1
+// request/second, and requires a descriptive User-Agent. Our usage (one
+// lookup per location ping, every few minutes per device) is well within
+// this. Note: this gives street/area/city-level addresses, not exact
+// property "plot numbers" - those live in land-registry records, not GPS.
+async function reverseGeocode(lat, lon) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1&zoom=18`;
+    const res = await fetch(url, {
+      headers: {
+        // Replace the email below with your own - Nominatim's usage policy
+        // asks for a way to contact you if there's ever an issue.
+        "User-Agent": "GuardianX-FamilyLocationApp/1.0 (family use; contact: your-email@example.com)",
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const a = data.address || {};
+    return {
+      formatted: data.display_name || null,
+      road: a.road || a.pedestrian || null,
+      area: a.neighbourhood || a.suburb || a.residential || null,
+      city: a.city || a.town || a.village || a.county || null,
+      state: a.state || null,
+      postcode: a.postcode || null,
+    };
+  } catch (e) {
+    console.error("Reverse geocode failed:", e.message);
+    return null;
   }
 }
-function loadData() {
-  ensureDataDir();
-  if (!fs.existsSync(DATA_FILE)) {
-    return { pairingCodes: {}, devices: {} };
-  }
-  return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+
+if (!MONGODB_URI) {
+  console.error(
+    "FATAL: MONGODB_URI environment variable is not set. Add it in Render -> Environment."
+  );
+  process.exit(1);
 }
-function saveData(data) {
-  ensureDataDir();
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+
+// ---------- MongoDB connection ----------
+// Two collections, matching the old data.json shape:
+//   pairingCodes: _id = the 6-digit code
+//   devices:      _id = deviceId
+let db;
+let pairingCodes;
+let devices;
+
+async function connectToMongo() {
+  const client = new MongoClient(MONGODB_URI);
+  await client.connect();
+  db = client.db(); // uses the database name from the connection string
+  pairingCodes = db.collection("pairingCodes");
+  devices = db.collection("devices");
+  // Helpful for fast lookups, harmless if they already exist
+  await pairingCodes.createIndex({ createdAt: 1 });
+  await devices.createIndex({ lastSeen: 1 });
+  console.log("Connected to MongoDB Atlas");
 }
 
 const app = express();
@@ -91,123 +122,174 @@ app.post("/api/login", (req, res) => {
 });
 
 // ---------- 1. Parent creates a pairing code ----------
-app.post("/api/pair/create", requireDashboardAuth, (req, res) => {
-  const { deviceLabel } = req.body;
-  const data = loadData();
+app.post("/api/pair/create", requireDashboardAuth, async (req, res) => {
+  try {
+    const { deviceLabel } = req.body;
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  data.pairingCodes[code] = {
-    deviceLabel: deviceLabel || "Unnamed device",
-    createdAt: Date.now(),
-    claimed: false,
-  };
-  saveData(data);
+    await pairingCodes.insertOne({
+      _id: code,
+      deviceLabel: deviceLabel || "Unnamed device",
+      createdAt: Date.now(),
+      claimed: false,
+    });
 
-  res.json({ code });
+    res.json({ code });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // ---------- 2. Child app claims the pairing code on first launch ----------
-app.post("/api/pair/claim", (req, res) => {
-  const { code } = req.body;
-  const data = loadData();
+app.post("/api/pair/claim", async (req, res) => {
+  try {
+    const { code } = req.body;
+    const entry = await pairingCodes.findOne({ _id: code });
 
-  const entry = data.pairingCodes[code];
-  if (!entry || entry.claimed) {
-    return res.status(400).json({ error: "Invalid or already used code" });
+    if (!entry || entry.claimed) {
+      return res.status(400).json({ error: "Invalid or already used code" });
+    }
+
+    const deviceId = uuidv4();
+    const deviceToken = uuidv4();
+
+    await pairingCodes.updateOne({ _id: code }, { $set: { claimed: true } });
+
+    await devices.insertOne({
+      _id: deviceId,
+      deviceId,
+      deviceToken,
+      deviceLabel: entry.deviceLabel,
+      pairedAt: Date.now(),
+      lastSeen: null,
+      lastLocation: null,
+      history: [],
+    });
+
+    res.json({ deviceId, deviceToken, deviceLabel: entry.deviceLabel });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
   }
-
-  const deviceId = uuidv4();
-  const deviceToken = uuidv4();
-
-  entry.claimed = true;
-  data.devices[deviceId] = {
-    deviceId,
-    deviceToken,
-    deviceLabel: entry.deviceLabel,
-    pairedAt: Date.now(),
-    lastSeen: null,
-    lastLocation: null,
-    history: [],
-  };
-  saveData(data);
-
-  res.json({ deviceId, deviceToken, deviceLabel: entry.deviceLabel });
 });
 
 // ---------- 3. Child app sends a location ping ----------
-app.post("/api/location", (req, res) => {
-  const { deviceId, deviceToken, latitude, longitude, accuracy, battery } = req.body;
-  const data = loadData();
+app.post("/api/location", async (req, res) => {
+  try {
+    const { deviceId, deviceToken, latitude, longitude, accuracy, battery } = req.body;
+    const device = await devices.findOne({ _id: deviceId });
 
-  const device = data.devices[deviceId];
-  if (!device || device.deviceToken !== deviceToken) {
-    return res.status(401).json({ error: "Unauthorized device" });
+    if (!device || device.deviceToken !== deviceToken) {
+      return res.status(401).json({ error: "Unauthorized device" });
+    }
+
+    const address = await reverseGeocode(latitude, longitude);
+
+    const point = {
+      latitude,
+      longitude,
+      accuracy: accuracy || null,
+      battery: battery || null,
+      timestamp: Date.now(),
+      address,
+    };
+
+    // Whatever was "current" a moment ago now becomes "previous" -
+    // this is what lets the dashboard show "was here, now here".
+    const previousLocation = device.lastLocation || null;
+
+    await devices.updateOne(
+      { _id: deviceId },
+      {
+        $set: {
+          lastSeen: point.timestamp,
+          lastLocation: point,
+          previousLocation: previousLocation,
+        },
+        // keep only the most recent 500 points, same as before
+        $push: { history: { $each: [point], $slice: -500 } },
+      }
+    );
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
   }
-
-  const point = {
-    latitude,
-    longitude,
-    accuracy: accuracy || null,
-    battery: battery || null,
-    timestamp: Date.now(),
-  };
-
-  device.lastSeen = point.timestamp;
-  device.lastLocation = point;
-  device.history.push(point);
-
-  if (device.history.length > 500) {
-    device.history = device.history.slice(-500);
-  }
-
-  saveData(data);
-  res.json({ ok: true });
 });
 
 // ---------- 4. Parent dashboard: list devices ----------
-app.get("/api/devices", requireDashboardAuth, (req, res) => {
-  const data = loadData();
-  const list = Object.values(data.devices).map((d) => ({
-    deviceId: d.deviceId,
-    deviceLabel: d.deviceLabel,
-    pairedAt: d.pairedAt || null,
-    lastSeen: d.lastSeen,
-    lastLocation: d.lastLocation,
-  }));
-  res.json(list);
+app.get("/api/devices", requireDashboardAuth, async (req, res) => {
+  try {
+    const all = await devices.find({}).toArray();
+    const list = all.map((d) => ({
+      deviceId: d.deviceId,
+      deviceLabel: d.deviceLabel,
+      pairedAt: d.pairedAt || null,
+      lastSeen: d.lastSeen,
+      lastLocation: d.lastLocation,
+      previousLocation: d.previousLocation || null,
+    }));
+    res.json(list);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // ---------- 5. Parent dashboard: history of one device ----------
-app.get("/api/devices/:id/history", requireDashboardAuth, (req, res) => {
-  const data = loadData();
-  const device = data.devices[req.params.id];
-  if (!device) return res.status(404).json({ error: "Not found" });
-  res.json(device.history);
+app.get("/api/devices/:id/history", requireDashboardAuth, async (req, res) => {
+  try {
+    const device = await devices.findOne({ _id: req.params.id });
+    if (!device) return res.status(404).json({ error: "Not found" });
+    res.json(device.history || []);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // ---------- 6. Rename a device ----------
-app.patch("/api/devices/:id", requireDashboardAuth, (req, res) => {
-  const { deviceLabel } = req.body;
-  const data = loadData();
-  const device = data.devices[req.params.id];
-  if (!device) return res.status(404).json({ error: "Not found" });
+app.patch("/api/devices/:id", requireDashboardAuth, async (req, res) => {
+  try {
+    const { deviceLabel } = req.body;
+    const device = await devices.findOne({ _id: req.params.id });
+    if (!device) return res.status(404).json({ error: "Not found" });
 
-  device.deviceLabel = deviceLabel || device.deviceLabel;
-  saveData(data);
-  res.json({ ok: true });
+    await devices.updateOne(
+      { _id: req.params.id },
+      { $set: { deviceLabel: deviceLabel || device.deviceLabel } }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // ---------- 7. Remove a device (and its location history) ----------
-app.delete("/api/devices/:id", requireDashboardAuth, (req, res) => {
-  const data = loadData();
-  if (!data.devices[req.params.id]) {
-    return res.status(404).json({ error: "Not found" });
+app.delete("/api/devices/:id", requireDashboardAuth, async (req, res) => {
+  try {
+    const result = await devices.deleteOne({ _id: req.params.id });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
   }
-  delete data.devices[req.params.id];
-  saveData(data);
-  res.json({ ok: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`GuardianX server running at http://localhost:${PORT}`);
-});
+// ---------- Start server only after MongoDB is connected ----------
+connectToMongo()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`GuardianX server running at http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to connect to MongoDB:", err.message);
+    process.exit(1);
+  });
