@@ -15,6 +15,20 @@
  *   GET  /                        -> live map dashboard (open in browser)
  *
  * Storage: simple JSON file (data.json) - fine for a family-scale app.
+ *
+ * ⚠️ IMPORTANT (Render / most PaaS hosts):
+ * The default filesystem on most hosting platforms is EPHEMERAL - it resets
+ * on every restart, redeploy, or scale event. If DATA_DIR is not pointed at
+ * a persistent disk, all paired devices and location history will silently
+ * disappear whenever the service restarts. This is almost always the cause
+ * of "devices/locations keep disappearing on their own".
+ *
+ * To fix on Render:
+ *   1. In the Render dashboard, add a "Disk" to this service (Render ->
+ *      your service -> Disks -> Add Disk), mounted at e.g. /var/data.
+ *   2. Set an environment variable DATA_DIR=/var/data on the service.
+ *   3. Redeploy. From then on, data.json lives on the persistent disk and
+ *      survives restarts/redeploys.
  */
 
 const express = require("express");
@@ -24,7 +38,10 @@ const { v4: uuidv4 } = require("uuid");
 const fs = require("fs");
 const path = require("path");
 
-const DATA_FILE = path.join(__dirname, "data.json");
+// Point this at a persistent disk mount in production (see note above).
+// Defaults to a local "data" folder next to server.js for local dev.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const DATA_FILE = path.join(DATA_DIR, "data.json");
 const PORT = process.env.PORT || 3000;
 
 // ⚠️ Dashboard password - isse Render ke Environment Variables me DASHBOARD_PASSWORD
@@ -32,13 +49,20 @@ const PORT = process.env.PORT || 3000;
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "changeme123";
 
 // ---------- tiny JSON "database" ----------
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
 function loadData() {
+  ensureDataDir();
   if (!fs.existsSync(DATA_FILE)) {
     return { pairingCodes: {}, devices: {} };
   }
   return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
 }
 function saveData(data) {
+  ensureDataDir();
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
