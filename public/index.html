@@ -3,19 +3,17 @@
 <head>
 <meta charset="UTF-8" />
 <title>GuardianX - Parent Dashboard</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body {
+  * { box-sizing: border-box; }
+  body {
     font-family: 'Inter', -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 0;
     background: #f4f6fb;
     color: #1a1f2b;
-    height: 100%;
-    overscroll-behavior: none;
   }
 
   /* ---------- Login screen ---------- */
@@ -25,84 +23,78 @@
     align-items: center;
     justify-content: center;
     background: linear-gradient(135deg, #1a2332 0%, #2c3e50 100%);
-    padding: 20px;
   }
   .login-box {
     background: white;
     border-radius: 16px;
-    padding: 36px 28px;
-    width: 100%;
-    max-width: 340px;
+    padding: 40px 36px;
+    width: 340px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.3);
     text-align: center;
   }
   .login-logo {
-    width: 60px; height: 60px;
+    width: 64px; height: 64px;
     border-radius: 16px;
     background: linear-gradient(135deg, #3498db, #2c3e50);
     display: flex; align-items: center; justify-content: center;
-    font-size: 28px;
+    font-size: 30px;
     margin: 0 auto 16px;
   }
-  .login-box h1 { font-size: 19px; margin: 0 0 4px; font-weight: 800; }
-  .login-box p { font-size: 13px; color: #8a94a6; margin: 0 0 22px; }
+  .login-box h1 { font-size: 20px; margin: 0 0 4px; font-weight: 800; }
+  .login-box p { font-size: 13px; color: #8a94a6; margin: 0 0 24px; }
   .login-box input {
-    width: 100%; padding: 13px 14px; border-radius: 10px;
-    border: 1.5px solid #e3e7ee; font-size: 16px; margin-bottom: 12px;
+    width: 100%; padding: 12px 14px; border-radius: 10px;
+    border: 1.5px solid #e3e7ee; font-size: 14px; margin-bottom: 12px;
     font-family: inherit; outline: none; transition: border-color .15s;
   }
   .login-box input:focus { border-color: #3498db; }
   .login-box button {
-    width: 100%; padding: 13px; border-radius: 10px; border: none;
-    background: #2c3e50; color: white; font-weight: 700; font-size: 15px;
+    width: 100%; padding: 12px; border-radius: 10px; border: none;
+    background: #2c3e50; color: white; font-weight: 700; font-size: 14px;
     cursor: pointer; font-family: inherit; transition: background .15s;
   }
-  .login-box button:active { background: #1a2634; }
+  .login-box button:hover { background: #1a2634; }
   .login-error { color: #e74c3c; font-size: 12px; margin-top: 10px; min-height: 16px; }
 
-  /* ---------- Main dashboard (desktop-first, overridden for mobile below) ---------- */
+  /* ---------- Main dashboard ---------- */
   #dashboard { display: none; height: 100vh; flex-direction: column; }
   header {
     background: #1a2332;
     color: white;
-    padding: 12px 20px;
+    padding: 14px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-shrink: 0;
-    z-index: 20;
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-icon {
-    width: 32px; height: 32px; border-radius: 8px;
+    width: 34px; height: 34px; border-radius: 9px;
     background: linear-gradient(135deg, #3498db, #2c3e50);
-    display: flex; align-items: center; justify-content: center; font-size: 16px;
-    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
   }
-  header h1 { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: .2px; }
-  header .sub { font-size: 10.5px; color: #8a94a6; margin-top: 1px; }
+  header h1 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: .2px; }
+  header .sub { font-size: 11px; color: #8a94a6; margin-top: 1px; }
   .logout-btn {
     background: rgba(255,255,255,0.08); border: none; color: #cfd6e3;
-    padding: 8px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;
-    font-family: inherit; font-weight: 600; flex-shrink: 0;
+    padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;
+    font-family: inherit; font-weight: 600;
   }
-  .logout-btn:active { background: rgba(255,255,255,0.2); }
+  .logout-btn:hover { background: rgba(255,255,255,0.15); }
 
-  .container { display: flex; flex: 1; overflow: hidden; position: relative; }
-  #map { flex: 1; z-index: 1; }
+  .container { display: flex; flex: 1; overflow: hidden; }
+  #map { flex: 1; }
 
   .sidebar {
     width: 340px;
     background: white;
-    padding: 16px;
+    padding: 18px;
     overflow-y: auto;
     border-right: 1px solid #eaedf3;
     flex-shrink: 0;
-    -webkit-overflow-scrolling: touch;
   }
   .section-label {
     font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .6px; color: #9aa4b5; margin: 16px 0 10px;
+    letter-spacing: .6px; color: #9aa4b5; margin: 18px 0 10px;
   }
   .section-label:first-child { margin-top: 0; }
 
@@ -110,19 +102,19 @@
     background: linear-gradient(135deg, #eef5ff, #f4f8ff);
     border: 1px solid #dde9fb;
     border-radius: 14px;
-    padding: 14px;
+    padding: 16px;
   }
   .pair-box input {
-    padding: 11px 12px; margin-top: 8px; width: 100%;
-    border-radius: 9px; border: 1.5px solid #d8e2f0; font-size: 15px;
+    padding: 10px 12px; margin-top: 8px; width: 100%;
+    border-radius: 9px; border: 1.5px solid #d8e2f0; font-size: 13px;
     font-family: inherit; outline: none;
   }
   .pair-box button {
-    margin-top: 10px; padding: 11px; width: 100%;
+    margin-top: 10px; padding: 10px; width: 100%;
     background: #2c3e50; color: white; border: none; border-radius: 9px;
-    cursor: pointer; font-weight: 700; font-size: 14px; font-family: inherit;
+    cursor: pointer; font-weight: 700; font-size: 13px; font-family: inherit;
   }
-  .pair-box button:active { background: #1a2634; }
+  .pair-box button:hover { background: #1a2634; }
   .code-display {
     font-size: 26px; font-weight: 800; text-align: center; margin-top: 12px;
     letter-spacing: 6px; color: #2c3e50; background: white;
@@ -134,110 +126,35 @@
     margin-bottom: 10px; cursor: pointer; transition: all .15s;
     background: white;
   }
-  .device-card:active { border-color: #c5d8f2; background: #f8fbff; }
+  .device-card:hover { border-color: #c5d8f2; box-shadow: 0 2px 10px rgba(52,152,219,0.08); }
   .device-card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-  .device-card h3 { margin: 0 0 3px; font-size: 14.5px; font-weight: 700; }
-  .device-card p { margin: 2px 0; font-size: 12px; color: #8a94a6; }
+  .device-card h3 { margin: 0 0 3px; font-size: 14px; font-weight: 700; }
+  .device-card p { margin: 2px 0; font-size: 11.5px; color: #8a94a6; }
   .device-status-dot {
     width: 8px; height: 8px; border-radius: 4px; display: inline-block;
     margin-right: 5px; background: #bbb;
   }
   .device-status-dot.online { background: #2ecc71; }
-  .device-actions { display: flex; gap: 6px; margin-top: 9px; }
+  .device-actions { display: flex; gap: 6px; margin-top: 8px; }
   .device-actions button {
-    flex: 1; font-size: 12px; padding: 9px 6px; border-radius: 8px; border: none;
+    flex: 1; font-size: 11px; padding: 6px; border-radius: 7px; border: none;
     cursor: pointer; font-family: inherit; font-weight: 600;
   }
   .btn-rename { background: #eef2f7; color: #4a5568; }
-  .btn-rename:active { background: #dde3ea; }
+  .btn-rename:hover { background: #e1e7ee; }
   .btn-remove { background: #fdecea; color: #e74c3c; }
-  .btn-remove:active { background: #f8cfc9; }
+  .btn-remove:hover { background: #fbdad7; }
+  .btn-history { background: #eaf3fd; color: #2c7be5; }
+  .btn-history:hover { background: #dcebfb; }
+  .btn-history.active { background: #2c7be5; color: white; }
 
   .empty-state { text-align: center; color: #b0b8c5; font-size: 12.5px; padding: 30px 10px; }
 
-  /* ---------- Mobile-only controls (hidden on desktop) ---------- */
-  .mobile-fab {
-    display: none;
-    position: absolute;
-    bottom: 20px;
-    right: 16px;
-    z-index: 15;
-    background: #2c3e50;
-    color: white;
-    border: none;
-    border-radius: 30px;
-    padding: 13px 20px;
-    font-size: 14px;
-    font-weight: 700;
-    font-family: inherit;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-    align-items: center;
-    gap: 8px;
-  }
-  .mobile-fab .badge {
-    background: #3498db;
-    color: white;
-    border-radius: 10px;
-    padding: 1px 7px;
-    font-size: 11px;
-    font-weight: 800;
-  }
-  .sheet-backdrop {
-    display: none;
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.4);
-    z-index: 30;
-  }
-  .sheet-close {
-    display: none;
-    width: 100%;
-    text-align: center;
-    padding: 10px;
-    font-size: 13px;
-    font-weight: 700;
-    color: #3498db;
-    background: none;
-    border: none;
-    font-family: inherit;
-  }
-  .sheet-handle {
-    display: none;
-    width: 40px; height: 4px; border-radius: 2px;
-    background: #d5dae2; margin: 8px auto 4px;
-  }
-
-  /* ================= MOBILE LAYOUT ================= */
-  @media (max-width: 768px) {
-    header h1 { font-size: 14px; }
-    header .sub { display: none; }
-
-    .container { flex-direction: column; }
-    #map { position: absolute; inset: 0; }
-
-    .mobile-fab { display: flex; }
-
-    .sidebar {
-      display: none;
-      width: 100%;
-      position: fixed;
-      left: 0; right: 0; bottom: 0;
-      top: auto;
-      max-height: 82vh;
-      border-radius: 20px 20px 0 0;
-      border-right: none;
-      box-shadow: 0 -8px 30px rgba(0,0,0,0.2);
-      z-index: 40;
-      padding-top: 4px;
-    }
-    .sidebar.open { display: block; }
-    .sheet-handle { display: block; }
-    .sheet-backdrop.open { display: block; }
-
-    .device-actions button { padding: 11px 6px; font-size: 13px; }
-    .pair-box input, .pair-box button { font-size: 16px; padding: 13px; }
-
-    .login-box { padding: 30px 22px; }
-  }
+  .gx-popup { font-family: inherit; font-size: 12.5px; min-width: 180px; }
+  .gx-popup .gx-popup-title { font-weight: 700; margin-bottom: 4px; font-size: 13px; }
+  .gx-popup .gx-popup-address { color: #4a5568; line-height: 1.4; }
+  .gx-popup .gx-popup-meta { color: #9aa4b5; margin-top: 6px; font-size: 11px; }
+  .gx-popup .gx-popup-loading { color: #9aa4b5; font-style: italic; }
 </style>
 </head>
 <body>
@@ -248,7 +165,7 @@
     <div class="login-logo">🛡️</div>
     <h1>GuardianX Dashboard</h1>
     <p>Aage badhne ke liye password daalein</p>
-    <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()" />
+    <input type="password" id="passwordInput" placeholder="Password" onkeydown="if(event.key==='Enter') doLogin()" />
     <button onclick="doLogin()">Login</button>
     <div class="login-error" id="loginError"></div>
   </div>
@@ -268,13 +185,7 @@
   </header>
 
   <div class="container">
-    <div id="map"></div>
-
-    <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeSheet()"></div>
-
-    <div class="sidebar" id="sidebar">
-      <div class="sheet-handle"></div>
-
+    <div class="sidebar">
       <div class="section-label">Naya device jodein</div>
       <div class="pair-box">
         <input type="text" id="deviceLabel" placeholder="Naam daalein (jaise: Rahul ka phone)" />
@@ -284,13 +195,8 @@
 
       <div class="section-label">Paired Devices</div>
       <div id="deviceList"></div>
-
-      <button class="sheet-close" onclick="closeSheet()">Band Karein ✕</button>
     </div>
-
-    <button class="mobile-fab" id="mobileFab" onclick="openSheet()">
-      📍 Devices <span class="badge" id="deviceCountBadge">0</span>
-    </button>
+    <div id="map"></div>
   </div>
 </div>
 
@@ -298,6 +204,62 @@
 <script>
   let dashboardPassword = sessionStorage.getItem('gx_pw') || '';
   let map, markers = {};
+  let trails = {}; // deviceId -> { polyline, pointMarkers: [] }
+  let deviceLabels = {}; // deviceId -> label, kept in sync for popups
+
+  // ---------- Reverse geocoding (OpenStreetMap Nominatim, free, no API key) ----------
+  // Simple cache (rounded coords) + a tiny request queue so we stay within
+  // Nominatim's fair-use rate limit (max ~1 request/second).
+  const addressCache = {};
+  let geocodeQueue = Promise.resolve();
+
+  function cacheKey(lat, lon) {
+    return lat.toFixed(4) + ',' + lon.toFixed(4);
+  }
+
+  function reverseGeocode(lat, lon) {
+    const key = cacheKey(lat, lon);
+    if (addressCache[key]) return Promise.resolve(addressCache[key]);
+
+    geocodeQueue = geocodeQueue.then(() => new Promise(resolve => setTimeout(resolve, 1000)));
+    return geocodeQueue.then(() =>
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
+        headers: { 'Accept-Language': 'en' }
+      })
+        .then(r => r.json())
+        .then(data => {
+          const address = data && data.display_name ? data.display_name : 'Address not found';
+          addressCache[key] = address;
+          return address;
+        })
+        .catch(() => 'Could not load address')
+    );
+  }
+
+  function buildPopupHtml(title, lat, lon, timestamp) {
+    const timeStr = timestamp ? new Date(timestamp).toLocaleString() : '';
+    return `
+      <div class="gx-popup">
+        <div class="gx-popup-title">${title}</div>
+        <div class="gx-popup-address gx-popup-loading" id="addr-${lat}-${lon}">Loading address...</div>
+        ${timeStr ? `<div class="gx-popup-meta">🕒 ${timeStr}</div>` : ''}
+        <div class="gx-popup-meta">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+      </div>
+    `;
+  }
+
+  function attachAddressPopup(layer, label, lat, lon, timestamp) {
+    layer.bindPopup(buildPopupHtml(label, lat, lon, timestamp));
+    layer.on('popupopen', () => {
+      reverseGeocode(lat, lon).then(address => {
+        const el = document.getElementById(`addr-${lat}-${lon}`);
+        if (el) {
+          el.innerText = address;
+          el.classList.remove('gx-popup-loading');
+        }
+      });
+    });
+  }
 
   async function doLogin() {
     const pw = document.getElementById('passwordInput').value;
@@ -338,18 +300,7 @@
     document.getElementById('dashboard').style.display = 'flex';
     if (!map) initMap();
     loadDevices();
-    // Mobile par pehli baar khulte hi sheet dikha dete hain
-    if (window.innerWidth <= 768) openSheet();
     setInterval(loadDevices, 15000);
-  }
-
-  function openSheet() {
-    document.getElementById('sidebar').classList.add('open');
-    document.getElementById('sheetBackdrop').classList.add('open');
-  }
-  function closeSheet() {
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sheetBackdrop').classList.remove('open');
   }
 
   function initMap() {
@@ -394,6 +345,7 @@
       map.removeLayer(markers[deviceId]);
       delete markers[deviceId];
     }
+    removeTrail(deviceId);
     loadDevices();
   }
 
@@ -404,15 +356,13 @@
     const listEl = document.getElementById('deviceList');
     listEl.innerHTML = '';
 
-    document.getElementById('deviceCountBadge').innerText = devices.length;
-
     if (devices.length === 0) {
       listEl.innerHTML = '<div class="empty-state">Abhi koi device paired nahi hai.<br/>Upar se pairing code banayein.</div>';
       return;
     }
 
     devices.forEach(d => {
-      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000;
+      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000; // 20 min threshold
       const lastSeenStr = d.lastSeen ? timeAgo(d.lastSeen) : 'Kabhi nahi';
 
       const card = document.createElement('div');
@@ -426,6 +376,7 @@
         </div>
         <div class="device-actions">
           <button class="btn-rename" onclick="event.stopPropagation(); renameDevice('${d.deviceId}', '${escapeHtml(d.deviceLabel)}')">✏️ Rename</button>
+          <button class="btn-history ${trails[d.deviceId] ? 'active' : ''}" onclick="event.stopPropagation(); toggleHistory('${d.deviceId}', '${escapeHtml(d.deviceLabel)}')">🧭 Path</button>
           <button class="btn-remove" onclick="event.stopPropagation(); removeDevice('${d.deviceId}', '${escapeHtml(d.deviceLabel)}')">🗑️ Remove</button>
         </div>
       `;
@@ -436,8 +387,15 @@
         if (markers[d.deviceId]) {
           markers[d.deviceId].setLatLng(pos);
         } else {
-          markers[d.deviceId] = L.marker(pos).addTo(map).bindPopup(d.deviceLabel);
+          markers[d.deviceId] = L.marker(pos).addTo(map);
         }
+        attachAddressPopup(
+          markers[d.deviceId],
+          '📍 ' + d.deviceLabel,
+          d.lastLocation.latitude,
+          d.lastLocation.longitude,
+          d.lastLocation.timestamp
+        );
       }
     });
   }
@@ -446,8 +404,53 @@
     if (markers[deviceId]) {
       map.setView(markers[deviceId].getLatLng(), 15);
       markers[deviceId].openPopup();
-      if (window.innerWidth <= 768) closeSheet();
     }
+  }
+
+  // ---------- Location history trail (multiple points on the map) ----------
+  async function toggleHistory(deviceId, label) {
+    if (trails[deviceId]) {
+      removeTrail(deviceId);
+      loadDevices();
+      return;
+    }
+
+    const res = await fetch('/api/devices/' + deviceId + '/history', { headers: authHeaders() });
+    if (res.status === 401) { logout(); return; }
+    const history = await res.json();
+
+    if (!history || history.length === 0) {
+      alert(`"${label}" ke liye abhi koi location history nahi hai.`);
+      return;
+    }
+
+    const latLngs = history.map(p => [p.latitude, p.longitude]);
+    const polyline = L.polyline(latLngs, { color: '#2c7be5', weight: 3, opacity: 0.7 }).addTo(map);
+
+    const pointMarkers = history.map((p, i) => {
+      const isLast = i === history.length - 1;
+      const circle = L.circleMarker([p.latitude, p.longitude], {
+        radius: isLast ? 7 : 5,
+        color: isLast ? '#2ecc71' : '#2c7be5',
+        fillColor: isLast ? '#2ecc71' : '#2c7be5',
+        fillOpacity: 0.9,
+        weight: 2,
+      }).addTo(map);
+      attachAddressPopup(circle, `${label} · point ${i + 1}/${history.length}`, p.latitude, p.longitude, p.timestamp);
+      return circle;
+    });
+
+    trails[deviceId] = { polyline, pointMarkers };
+    map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+    loadDevices();
+  }
+
+  function removeTrail(deviceId) {
+    const trail = trails[deviceId];
+    if (!trail) return;
+    map.removeLayer(trail.polyline);
+    trail.pointMarkers.forEach(m => map.removeLayer(m));
+    delete trails[deviceId];
   }
 
   function timeAgo(ts) {
@@ -463,6 +466,7 @@
     return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  // Agar pehle se login ho, seedha dashboard dikhao
   if (dashboardPassword) {
     fetch('/api/login', {
       method: 'POST',
