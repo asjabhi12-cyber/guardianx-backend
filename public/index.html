@@ -136,6 +136,9 @@
     margin-right: 5px; background: #bbb;
   }
   .device-status-dot.online { background: #2ecc71; }
+  .device-address { font-size: 12px; margin-top: 4px; line-height: 1.4; }
+  .device-address-current { color: #2c3e50; font-weight: 500; }
+  .device-address-previous { color: #95a5a6; }
   .device-actions { display: flex; gap: 6px; margin-top: 8px; }
   .device-actions button {
     flex: 1; font-size: 11px; padding: 6px; border-radius: 7px; border: none;
@@ -426,8 +429,18 @@
     }
 
     devices.forEach(d => {
-      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000; // 20 min threshold
+      // Devices always show as Active once paired - status only changes
+      // to "removed" when the parent explicitly removes the device.
+      const isOnline = true;
       const lastSeenStr = d.lastSeen ? timeAgo(d.lastSeen) : 'Kabhi nahi';
+
+      const currentAddr = d.lastLocation && d.lastLocation.address
+        ? (d.lastLocation.address.formatted || `${d.lastLocation.address.road || ''} ${d.lastLocation.address.area || ''} ${d.lastLocation.address.city || ''}`.trim())
+        : (d.lastLocation ? `${d.lastLocation.latitude.toFixed(5)}, ${d.lastLocation.longitude.toFixed(5)}` : null);
+
+      const previousAddr = d.previousLocation && d.previousLocation.address
+        ? (d.previousLocation.address.formatted || `${d.previousLocation.address.road || ''} ${d.previousLocation.address.area || ''} ${d.previousLocation.address.city || ''}`.trim())
+        : (d.previousLocation ? `${d.previousLocation.latitude.toFixed(5)}, ${d.previousLocation.longitude.toFixed(5)}` : null);
 
       const card = document.createElement('div');
       card.className = 'device-card';
@@ -435,7 +448,9 @@
         <div class="device-card-top" onclick="focusDevice('${d.deviceId}')">
           <div>
             <h3>${escapeHtml(d.deviceLabel)}</h3>
-            <p><span class="device-status-dot ${isOnline ? 'online' : ''}"></span>${isOnline ? 'Active' : 'Last seen: ' + lastSeenStr}</p>
+            <p><span class="device-status-dot online"></span>Active${d.lastSeen ? ' · Last update: ' + lastSeenStr : ' · Waiting for first location...'}</p>
+            ${currentAddr ? `<p class="device-address device-address-current">📍 Ab yahan: ${escapeHtml(currentAddr)}</p>` : ''}
+            ${previousAddr ? `<p class="device-address device-address-previous">↩️ Pehle yahan tha: ${escapeHtml(previousAddr)}</p>` : ''}
           </div>
         </div>
         <div class="device-actions">
