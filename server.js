@@ -38,27 +38,34 @@ const MONGODB_URI = process.env.MONGODB_URI;
 // naam se set karein (recommended), warna ye default use hoga.
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "changeme123";
 
+// A descriptive User-Agent, shared by both OSM services we call below.
+// Nominatim's and Overpass's usage policies both ask for a contact point.
+const OSM_USER_AGENT = "GuardianX-FamilyLocationApp/1.0 (family use; contact: your-email@example.com)";
+
 // ---------- Reverse geocoding (lat/long -> human-readable address) ----------
 // Uses OpenStreetMap's free Nominatim service. Free tier limits: max ~1
 // request/second, and requires a descriptive User-Agent. Our usage (one
 // lookup per location ping, every few minutes per device) is well within
-// this. Note: this gives street/area/city-level addresses, not exact
-// property "plot numbers" - those live in land-registry records, not GPS.
+// this.
+//
+// IMPORTANT LIMITATION: this can NOT return a survey "plot number" - that
+// lives in local land-registry / municipal records, not in GPS or OSM data.
+// What it CAN give: house/building number (when mapped), road, area, city,
+// state, postcode - and, combined with findNearbyLandmark() below, the
+// nearest named place (hospital, hotel, school, etc.), which in practice is
+// usually the most useful way to pinpoint a location precisely.
 async function reverseGeocode(lat, lon) {
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1&zoom=18`;
     const res = await fetch(url, {
-      headers: {
-        // Replace the email below with your own - Nominatim's usage policy
-        // asks for a way to contact you if there's ever an issue.
-        "User-Agent": "GuardianX-FamilyLocationApp/1.0 (family use; contact: your-email@example.com)",
-      },
+      headers: { "User-Agent": OSM_USER_AGENT },
     });
     if (!res.ok) return null;
     const data = await res.json();
     const a = data.address || {};
     return {
       formatted: data.display_name || null,
+      houseNumber: a.house_number || null,
       road: a.road || a.pedestrian || null,
       area: a.neighbourhood || a.suburb || a.residential || null,
       city: a.city || a.town || a.village || a.county || null,
@@ -69,6 +76,99 @@ async function reverseGeocode(lat, lon) {
     console.error("Reverse geocode failed:", e.message);
     return null;
   }
+}
+
+// ---------- Nearby landmark lookup (nearest hospital/hotel/school/etc.) ----------
+// Uses the free Overpass API to find named places close to the point, then
+// picks the nearest one. This is what gives you "near XYZ Hospital (120m)"
+// style context that a plain street address usually can't.
+const LANDMARK_SEARCH_RADIUS_M = 250;
+const LANDMARK_AMENITY_TYPES = [
+  "hospital",
+  "clinic",
+  "pharmacy",
+  "school",
+  "college",
+  "university",
+  "hotel",
+  "restaurant",
+  "cafe",
+  "bank",
+  "atm",
+  "fuel",
+  "police",
+  "place_of_worship",
+  "bus_station",
+  "railway_station",
+];
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // Earth radius in meters
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function findNearbyLandmark(lat, lon) {
+  try {
+    const amenityFilter = LANDMARK_AMENITY_TYPES.join("|");
+    const query = `[out:json][timeout:10];
+(
+  node(around:${LANDMARK_SEARCH_RADIUS_M},${lat},${lon})["amenity"~"^(${amenityFilter})$"]["name"];
+  node(around:${LANDMARK_SEARCH_RADIUS_M},${lat},${lon})["shop"]["name"];
+);
+out body 15;`;
+
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain",
+        "User-Agent": OSM_USER_AGENT,
+      },
+      body: query,
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const elements = data.elements || [];
+    if (elements.length === 0) return null;
+
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const el of elements) {
+      if (!el.tags || !el.tags.name || el.lat == null || el.lon == null) continue;
+      const dist = haversineMeters(lat, lon, el.lat, el.lon);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = el;
+      }
+    }
+    if (!nearest) return null;
+
+    const kind = nearest.tags.amenity || nearest.tags.shop || "place";
+    return {
+      name: nearest.tags.name,
+      kind,
+      distanceMeters: Math.round(nearestDist),
+      label: `Near ${nearest.tags.name} (${Math.round(nearestDist)}m)`,
+    };
+  } catch (e) {
+    console.error("Nearby landmark lookup failed:", e.message);
+    return null;
+  }
+}
+
+// Runs both lookups in parallel so one slow call doesn't double the latency.
+async function getAddressDetails(lat, lon) {
+  const [address, landmark] = await Promise.all([
+    reverseGeocode(lat, lon),
+    findNearbyLandmark(lat, lon),
+  ]);
+  return { ...(address || {}), landmark: landmark || null };
 }
 
 if (!MONGODB_URI) {
@@ -185,7 +285,7 @@ app.post("/api/location", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized device" });
     }
 
-    const address = await reverseGeocode(latitude, longitude);
+    const address = await getAddressDetails(latitude, longitude);
 
     const point = {
       latitude,
