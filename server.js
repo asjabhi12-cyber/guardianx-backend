@@ -11,6 +11,15 @@
  *   GET  /api/devices             -> parent dashboard: list of paired devices (needs dashboard password)
  *   GET  /api/devices/:id/history -> parent dashboard: location history of one device
  *                                     (rolling 24h window by default - see ?hours= below)
+ *   GET  /api/geocode             -> parent dashboard: on-demand address+landmark lookup
+ *                                     for a lat/lon that doesn't already have a saved
+ *                                     address (e.g. old points from before this feature
+ *                                     existed). Goes through the SAME server-side lookup
+ *                                     used for location pings, so the browser never has
+ *                                     to call Nominatim/Overpass itself - that's what was
+ *                                     causing the slow/stuck "Loading address..." before,
+ *                                     since those services often rate-limit or ignore
+ *                                     requests coming straight from a browser tab.
  *   PATCH /api/devices/:id        -> rename a device
  *   DELETE /api/devices/:id       -> remove a device + its history
  *   GET  /                        -> live map dashboard (open in browser)
@@ -169,6 +178,16 @@ async function getAddressDetails(lat, lon) {
     findNearbyLandmark(lat, lon),
   ]);
   return { ...(address || {}), landmark: landmark || null };
+}
+
+// Small in-memory cache so the dashboard can poll/re-render without
+// re-hitting Nominatim/Overpass for the same coordinates every time.
+// Keyed to ~11m precision (4 decimal places), same as the old client cache.
+const geocodeMemoCache = new Map();
+const GEOCODE_CACHE_MAX = 500;
+
+function geocodeCacheKey(lat, lon) {
+  return `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`;
 }
 
 if (!MONGODB_URI) {
@@ -355,6 +374,44 @@ app.get("/api/devices/:id/history", requireDashboardAuth, async (req, res) => {
     const recent = fullHistory.filter((p) => p.timestamp >= cutoff);
 
     res.json(recent);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---------- 5b. Parent dashboard: on-demand geocode for points missing address ----------
+// Only needed as a fallback for OLD points saved before `address` was added
+// to each ping (see step 3 above). The dashboard calls this instead of
+// hitting Nominatim/Overpass directly from the browser, which is what was
+// causing the very slow / stuck "Loading address..." - those free OSM
+// services frequently throttle or ignore requests coming straight from a
+// browser tab (no reliable way to send a proper identifying User-Agent from
+// client-side JS). Doing it here, server-side, reuses the same fast, working
+// path already used for live pings.
+app.get("/api/geocode", requireDashboardAuth, async (req, res) => {
+  try {
+    const lat = parseFloat(req.query.lat);
+    const lon = parseFloat(req.query.lon);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
+      return res.status(400).json({ error: "lat and lon are required" });
+    }
+
+    const key = geocodeCacheKey(lat, lon);
+    if (geocodeMemoCache.has(key)) {
+      return res.json(geocodeMemoCache.get(key));
+    }
+
+    const address = await getAddressDetails(lat, lon);
+
+    // Simple bounded cache - keep it from growing forever on a long-running server.
+    if (geocodeMemoCache.size >= GEOCODE_CACHE_MAX) {
+      const firstKey = geocodeMemoCache.keys().next().value;
+      geocodeMemoCache.delete(firstKey);
+    }
+    geocodeMemoCache.set(key, address);
+
+    res.json(address);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Server error" });
