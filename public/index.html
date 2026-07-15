@@ -153,6 +153,7 @@
 
   .gx-popup { font-family: inherit; font-size: 12.5px; min-width: 180px; }
   .gx-popup .gx-popup-title { font-weight: 700; margin-bottom: 4px; font-size: 13px; }
+  .gx-popup .gx-popup-landmark { color: #2c7be5; font-weight: 700; font-size: 12.5px; margin-bottom: 3px; }
   .gx-popup .gx-popup-address { color: #4a5568; line-height: 1.4; }
   .gx-popup .gx-popup-meta { color: #9aa4b5; margin-top: 6px; font-size: 11px; }
   .gx-popup .gx-popup-loading { color: #9aa4b5; font-style: italic; }
@@ -164,6 +165,10 @@
     line-height: 1.4;
   }
   .device-location-line .lbl { color: #9aa4b5; }
+  .device-location-line .landmark-tag {
+    color: #2c7be5;
+    font-weight: 700;
+  }
   .device-warning {
     display: flex;
     align-items: center;
@@ -308,17 +313,131 @@
 
     geocodeQueue = geocodeQueue.then(() => new Promise(resolve => setTimeout(resolve, 1000)));
     return geocodeQueue.then(() =>
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&namedetails=1&extratags=1`, {
         headers: { 'Accept-Language': 'en' }
       })
         .then(r => r.json())
         .then(data => {
           const address = data && data.display_name ? data.display_name : 'Address not found';
-          addressCache[key] = address;
-          return address;
+          // If the point itself sits on/inside a named place (hotel, hospital, mall, etc.)
+          // Nominatim's own "name" + "type"/"class" fields already tell us that directly —
+          // no separate landmark lookup needed for this common case.
+          let directPlace = null;
+          if (data && data.name && data.address) {
+            const cls = data.class || '';
+            const typ = data.type || '';
+            const knownKinds = ['hospital','hotel','restaurant','school','college','university',
+              'mall','clinic','pharmacy','bank','park','stadium','place_of_worship','fuel',
+              'guest_house','hostel'];
+            if (knownKinds.includes(typ) || cls === 'amenity' || cls === 'tourism' || cls === 'shop') {
+              directPlace = { name: data.name, type: typ || cls };
+            }
+          }
+          const result = { address, directPlace };
+          addressCache[key] = result;
+          return result;
         })
-        .catch(() => 'Could not load address')
+        .catch(() => ({ address: 'Could not load address', directPlace: null }))
     );
+  }
+
+  // ---------- Nearby landmark lookup (Overpass API — free, no API key) ----------
+  // Finds the closest named hospital / hotel / restaurant / school / mall / etc.
+  // within ~120 meters of a point, so a parent can tell at a glance "ye XYZ Hospital
+  // ke paas hai" instead of just a road name.
+  const landmarkCache = {};
+  const LANDMARK_KINDS = {
+    amenity: ['hospital', 'clinic', 'restaurant', 'cafe', 'school', 'college', 'university',
+      'bank', 'pharmacy', 'place_of_worship', 'police', 'fuel', 'fast_food', 'bar', 'cinema'],
+    tourism: ['hotel', 'guest_house', 'hostel', 'attraction', 'mall'],
+    shop: ['mall', 'supermarket', 'department_store']
+  };
+
+  function toRad(v) { return v * Math.PI / 180; }
+  function distanceMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // Overpass also gets its own gentle rate-limit queue so we don't hammer the
+  // free public endpoint when several markers/points load at once.
+  let overpassQueue = Promise.resolve();
+
+  function findNearbyLandmark(lat, lon, radius = 120) {
+    const key = cacheKey(lat, lon) + ':' + radius;
+    if (landmarkCache[key] !== undefined) return Promise.resolve(landmarkCache[key]);
+
+    const filters = [];
+    for (const tag in LANDMARK_KINDS) {
+      const regex = LANDMARK_KINDS[tag].join('|');
+      filters.push(`node(around:${radius},${lat},${lon})[${tag}~"^(${regex})$"];`);
+      filters.push(`way(around:${radius},${lat},${lon})[${tag}~"^(${regex})$"];`);
+    }
+    const query = `[out:json][timeout:8];(${filters.join('')});out center 10;`;
+
+    overpassQueue = overpassQueue.then(() => new Promise(resolve => setTimeout(resolve, 600)));
+    return overpassQueue.then(() =>
+      fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(query)
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (!data.elements || data.elements.length === 0) {
+            landmarkCache[key] = null;
+            return null;
+          }
+          let best = null;
+          let bestDist = Infinity;
+          data.elements.forEach(el => {
+            const name = el.tags && (el.tags.name || el.tags['name:en']);
+            if (!name) return; // skip unnamed places, not useful to a parent
+            const elLat = el.lat || (el.center && el.center.lat);
+            const elLon = el.lon || (el.center && el.center.lon);
+            if (elLat == null || elLon == null) return;
+            const dist = distanceMeters(lat, lon, elLat, elLon);
+            if (dist < bestDist) {
+              bestDist = dist;
+              const kind = el.tags.amenity || el.tags.tourism || el.tags.shop || '';
+              best = { name, kind, distance: Math.round(dist) };
+            }
+          });
+          landmarkCache[key] = best;
+          return best;
+        })
+        .catch(() => null)
+    );
+  }
+
+  const KIND_LABELS_HI = {
+    hospital: 'Hospital', clinic: 'Clinic', restaurant: 'Restaurant', cafe: 'Cafe',
+    school: 'School', college: 'College', university: 'University', bank: 'Bank',
+    pharmacy: 'Pharmacy', place_of_worship: 'Dharmik sthal', police: 'Police Station',
+    fuel: 'Petrol Pump', fast_food: 'Fast Food', bar: 'Bar', cinema: 'Cinema',
+    hotel: 'Hotel', guest_house: 'Guest House', hostel: 'Hostel',
+    attraction: 'Attraction', mall: 'Mall', supermarket: 'Supermarket',
+    department_store: 'Store'
+  };
+
+  // Combines Nominatim's address with the nearest named landmark so the UI can
+  // show something like: "🏨 Hotel Sunrise ke paas (35 mtr) · Road: MG Road, ..."
+  function describeLocation(lat, lon) {
+    return Promise.all([reverseGeocode(lat, lon), findNearbyLandmark(lat, lon)])
+      .then(([geo, landmark]) => {
+        let landmarkLine = null;
+        if (geo.directPlace) {
+          const label = KIND_LABELS_HI[geo.directPlace.type] || geo.directPlace.type;
+          landmarkLine = `📍 ${geo.directPlace.name} (${label}) ke andar`;
+        } else if (landmark) {
+          const label = KIND_LABELS_HI[landmark.kind] || landmark.kind || 'Jagah';
+          landmarkLine = `📍 ${landmark.name} (${label}) ke paas · ${landmark.distance} mtr`;
+        }
+        return { address: geo.address, landmarkLine };
+      });
   }
 
   function buildPopupHtml(title, lat, lon, timestamp) {
@@ -326,6 +445,7 @@
     return `
       <div class="gx-popup">
         <div class="gx-popup-title">${title}</div>
+        <div class="gx-popup-landmark gx-popup-loading" id="landmark-${lat}-${lon}"></div>
         <div class="gx-popup-address gx-popup-loading" id="addr-${lat}-${lon}">Loading address...</div>
         ${timeStr ? `<div class="gx-popup-meta">🕒 ${timeStr}</div>` : ''}
         <div class="gx-popup-meta">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
@@ -336,11 +456,17 @@
   function attachAddressPopup(layer, label, lat, lon, timestamp) {
     layer.bindPopup(buildPopupHtml(label, lat, lon, timestamp));
     layer.on('popupopen', () => {
-      reverseGeocode(lat, lon).then(address => {
-        const el = document.getElementById(`addr-${lat}-${lon}`);
-        if (el) {
-          el.innerText = address;
-          el.classList.remove('gx-popup-loading');
+      describeLocation(lat, lon).then(({ address, landmarkLine }) => {
+        const addrEl = document.getElementById(`addr-${lat}-${lon}`);
+        if (addrEl) {
+          addrEl.innerText = address;
+          addrEl.classList.remove('gx-popup-loading');
+        }
+        const landmarkEl = document.getElementById(`landmark-${lat}-${lon}`);
+        if (landmarkEl) {
+          landmarkEl.classList.remove('gx-popup-loading');
+          landmarkEl.innerText = landmarkLine || '';
+          landmarkEl.style.display = landmarkLine ? 'block' : 'none';
         }
       });
     });
@@ -472,15 +598,19 @@
       listEl.appendChild(card);
 
       if (d.lastLocation) {
-        reverseGeocode(d.lastLocation.latitude, d.lastLocation.longitude).then(address => {
+        describeLocation(d.lastLocation.latitude, d.lastLocation.longitude).then(({ address, landmarkLine }) => {
           const el = document.getElementById('addr-now-' + d.deviceId);
-          if (el) el.innerText = address;
+          if (el) {
+            el.innerHTML = (landmarkLine ? `<span class="landmark-tag">${escapeHtml(landmarkLine)}</span><br/>` : '') + escapeHtml(address);
+          }
         });
       }
       if (d.previousLocation) {
-        reverseGeocode(d.previousLocation.latitude, d.previousLocation.longitude).then(address => {
+        describeLocation(d.previousLocation.latitude, d.previousLocation.longitude).then(({ address, landmarkLine }) => {
           const el = document.getElementById('addr-prev-' + d.deviceId);
-          if (el) el.innerText = address;
+          if (el) {
+            el.innerHTML = (landmarkLine ? `<span class="landmark-tag">${escapeHtml(landmarkLine)}</span><br/>` : '') + escapeHtml(address);
+          }
         });
       }
 
