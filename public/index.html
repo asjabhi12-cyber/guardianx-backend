@@ -136,9 +136,6 @@
     margin-right: 5px; background: #bbb;
   }
   .device-status-dot.online { background: #2ecc71; }
-  .device-address { font-size: 12px; margin-top: 4px; line-height: 1.4; }
-  .device-address-current { color: #2c3e50; font-weight: 500; }
-  .device-address-previous { color: #95a5a6; }
   .device-actions { display: flex; gap: 6px; margin-top: 8px; }
   .device-actions button {
     flex: 1; font-size: 11px; padding: 6px; border-radius: 7px; border: none;
@@ -159,6 +156,27 @@
   .gx-popup .gx-popup-address { color: #4a5568; line-height: 1.4; }
   .gx-popup .gx-popup-meta { color: #9aa4b5; margin-top: 6px; font-size: 11px; }
   .gx-popup .gx-popup-loading { color: #9aa4b5; font-style: italic; }
+
+  .device-location-line {
+    font-size: 12px;
+    color: #5a6b7a;
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+  .device-location-line .lbl { color: #9aa4b5; }
+  .device-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff4e5;
+    border: 1px solid #ffdca8;
+    color: #a15c00;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin-top: 8px;
+  }
 
   /* ---------- Mobile: sidebar becomes a slide-up drawer over the map ---------- */
   .sidebar-drag-handle { display: none; }
@@ -429,18 +447,9 @@
     }
 
     devices.forEach(d => {
-      // Devices always show as Active once paired - status only changes
-      // to "removed" when the parent explicitly removes the device.
-      const isOnline = true;
+      const isOnline = d.lastSeen && (Date.now() - d.lastSeen) < 20 * 60 * 1000; // 20 min threshold
       const lastSeenStr = d.lastSeen ? timeAgo(d.lastSeen) : 'Kabhi nahi';
-
-      const currentAddr = d.lastLocation && d.lastLocation.address
-        ? (d.lastLocation.address.formatted || `${d.lastLocation.address.road || ''} ${d.lastLocation.address.area || ''} ${d.lastLocation.address.city || ''}`.trim())
-        : (d.lastLocation ? `${d.lastLocation.latitude.toFixed(5)}, ${d.lastLocation.longitude.toFixed(5)}` : null);
-
-      const previousAddr = d.previousLocation && d.previousLocation.address
-        ? (d.previousLocation.address.formatted || `${d.previousLocation.address.road || ''} ${d.previousLocation.address.area || ''} ${d.previousLocation.address.city || ''}`.trim())
-        : (d.previousLocation ? `${d.previousLocation.latitude.toFixed(5)}, ${d.previousLocation.longitude.toFixed(5)}` : null);
+      const locationOff = d.locationEnabled === false;
 
       const card = document.createElement('div');
       card.className = 'device-card';
@@ -448,9 +457,10 @@
         <div class="device-card-top" onclick="focusDevice('${d.deviceId}')">
           <div>
             <h3>${escapeHtml(d.deviceLabel)}</h3>
-            <p><span class="device-status-dot online"></span>Active${d.lastSeen ? ' · Last update: ' + lastSeenStr : ' · Waiting for first location...'}</p>
-            ${currentAddr ? `<p class="device-address device-address-current">📍 Ab yahan: ${escapeHtml(currentAddr)}</p>` : ''}
-            ${previousAddr ? `<p class="device-address device-address-previous">↩️ Pehle yahan tha: ${escapeHtml(previousAddr)}</p>` : ''}
+            <p><span class="device-status-dot ${isOnline ? 'online' : ''}"></span>${isOnline ? 'Active' : 'Last seen: ' + lastSeenStr}</p>
+            <div class="device-location-line"><span class="lbl">📍 Ab yahan:</span> <span id="addr-now-${d.deviceId}">${d.lastLocation ? 'Loading address...' : 'Abhi tak koi location nahi'}</span></div>
+            <div class="device-location-line"><span class="lbl">🕓 Pehle yahan tha:</span> <span id="addr-prev-${d.deviceId}">${d.previousLocation ? 'Loading address...' : '—'}</span></div>
+            ${locationOff ? '<div class="device-warning">⚠️ Location band hai is device par — aakhri maloom jagah upar dikh rahi hai.</div>' : ''}
           </div>
         </div>
         <div class="device-actions">
@@ -460,6 +470,19 @@
         </div>
       `;
       listEl.appendChild(card);
+
+      if (d.lastLocation) {
+        reverseGeocode(d.lastLocation.latitude, d.lastLocation.longitude).then(address => {
+          const el = document.getElementById('addr-now-' + d.deviceId);
+          if (el) el.innerText = address;
+        });
+      }
+      if (d.previousLocation) {
+        reverseGeocode(d.previousLocation.latitude, d.previousLocation.longitude).then(address => {
+          const el = document.getElementById('addr-prev-' + d.deviceId);
+          if (el) el.innerText = address;
+        });
+      }
 
       if (d.lastLocation) {
         const pos = [d.lastLocation.latitude, d.lastLocation.longitude];
@@ -503,19 +526,30 @@
   }
 
   // ---------- Location history trail (multiple points on the map) ----------
+  // The backend only returns points from the last 24 hours (rolling window),
+  // so as time passes the path naturally "refreshes" to reflect today's route.
+  // While a trail is open we also re-fetch it every few minutes so it stays current.
   async function toggleHistory(deviceId, label) {
     if (trails[deviceId]) {
       removeTrail(deviceId);
       loadDevices();
       return;
     }
+    await drawTrail(deviceId, label, { fit: true });
+    closeSidebarOnMobile();
+  }
 
-    const res = await fetch('/api/devices/' + deviceId + '/history', { headers: authHeaders() });
+  async function drawTrail(deviceId, label, opts) {
+    opts = opts || {};
+    const res = await fetch('/api/devices/' + deviceId + '/history?hours=24', { headers: authHeaders() });
     if (res.status === 401) { logout(); return; }
     const history = await res.json();
 
+    // Remove any existing layers for this device before redrawing
+    removeTrail(deviceId);
+
     if (!history || history.length === 0) {
-      alert(`"${label}" ke liye abhi koi location history nahi hai.`);
+      if (opts.fit) alert(`"${label}" ke liye pichhle 24 ghanton mein koi location history nahi hai.`);
       return;
     }
 
@@ -535,11 +569,21 @@
       return circle;
     });
 
-    trails[deviceId] = { polyline, pointMarkers };
-    map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+    trails[deviceId] = { polyline, pointMarkers, label };
     loadDevices();
-    closeSidebarOnMobile();
+    if (opts.fit) {
+      map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+    }
   }
+
+  // Every 5 minutes, silently redraw any trail that's currently open so the
+  // 24-hour window stays up to date without the person needing to click again.
+  setInterval(() => {
+    Object.keys(trails).forEach(deviceId => {
+      const label = trails[deviceId].label;
+      drawTrail(deviceId, label, { fit: false });
+    });
+  }, 5 * 60 * 1000);
 
   function removeTrail(deviceId) {
     const trail = trails[deviceId];
