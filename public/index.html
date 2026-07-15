@@ -333,11 +333,33 @@
               directPlace = { name: data.name, type: typ || cls };
             }
           }
-          const result = { address, directPlace };
+          // Build a short, specific "area" phrase from the address components —
+          // e.g. "Church Road, Katla Bazaar" instead of the full
+          // "Alwar, Alwar Tehsil, Alwar, Rajasthan, 300101, India" string.
+          // This is used as a fallback whenever no exact POI landmark is found,
+          // so the parent always sees *something* specific, not just a district name.
+          let specificArea = null;
+          const a = data && data.address;
+          if (a) {
+            const specific = a.road || a.pedestrian || a.residential || a.footway || a.house_number;
+            const area = a.neighbourhood || a.suburb || a.quarter || a.hamlet ||
+              a.village || a.town || a.city_district || a.borough || a.county;
+            const parts = [specific, area].filter(Boolean);
+            const uniqueParts = [...new Set(parts)];
+            if (uniqueParts.length) specificArea = uniqueParts.join(', ');
+          }
+          // Absolute last resort if even address components are sparse (rare, rural
+          // points): trim the full display_name down to its first 2 meaningful
+          // segments instead of showing the whole pincode+country string.
+          if (!specificArea && data && data.display_name) {
+            const segs = data.display_name.split(',').map(s => s.trim()).filter(Boolean);
+            if (segs.length) specificArea = segs.slice(0, 2).join(', ');
+          }
+          const result = { address, directPlace, specificArea };
           addressCache[key] = result;
           return result;
         })
-        .catch(() => ({ address: 'Could not load address', directPlace: null }))
+        .catch(() => ({ address: 'Could not load address', directPlace: null, specificArea: null }))
     );
   }
 
@@ -356,7 +378,7 @@
     leisure: ['park', 'stadium', 'sports_centre'],
     building: ['mall', 'commercial', 'retail', 'hospital', 'hotel']
   };
-  const SEARCH_RINGS = [150, 400, 1000, 2000]; // meters, tried in order
+  const SEARCH_RINGS = [40, 150, 400, 1000, 2500]; // meters, tried in order — first ring = "inside" check
 
   function toRad(v) { return v * Math.PI / 180; }
   function distanceMeters(lat1, lon1, lat2, lon2) {
@@ -407,8 +429,8 @@
     return best;
   }
 
-  // Tries each ring in order (150m, 400m, 1km, 2km) and returns the nearest
-  // named landmark found in the first ring that has one.
+  // Tries each ring in order (40m "inside" check, then 150m/400m/1km/2.5km) and
+  // returns the nearest named landmark found in the first ring that has one.
   function findNearbyLandmark(lat, lon, ringIndex = 0) {
     if (ringIndex >= SEARCH_RINGS.length) return Promise.resolve(null);
     const radius = SEARCH_RINGS[ringIndex];
@@ -429,6 +451,7 @@
     return queryOverpass(query)
       .then(data => {
         const best = bestNamedElement(data.elements, lat, lon);
+        if (best) best.inside = (ringIndex === 0); // found within the tight 40m ring
         landmarkCache[key] = best;
         if (best) return best;
         return findNearbyLandmark(lat, lon, ringIndex + 1);
@@ -448,8 +471,13 @@
     commercial: 'Commercial Building', retail: 'Shopping Area'
   };
 
-  // Combines Nominatim's address with the nearest named landmark so the UI can
-  // show something like: "🏬 Wonder Mall ke paas · 850 mtr · Road: MG Road, ..."
+  // Combines Nominatim's address with the nearest named landmark so the UI
+  // always shows something specific and useful, in this priority order:
+  //   1. Point is directly inside a named place  → "Wonder Mall ke andar"
+  //   2. A named POI found within 40m (still "inside" for GPS accuracy) → "...ke andar"
+  //   3. A named POI found further away           → "Wonder Mall ke paas · 850 mtr"
+  //   4. No POI found anywhere within 2.5km        → "Church Road, Katla Bazaar ke area mein"
+  //   5. Nothing usable at all                     → no landmark line, just the raw address
   function describeLocation(lat, lon) {
     return Promise.all([reverseGeocode(lat, lon), findNearbyLandmark(lat, lon)])
       .then(([geo, landmark]) => {
@@ -457,9 +485,14 @@
         if (geo.directPlace) {
           const label = KIND_LABELS_HI[geo.directPlace.type] || geo.directPlace.type;
           landmarkLine = `📍 ${geo.directPlace.name} (${label}) ke andar`;
+        } else if (landmark && landmark.inside) {
+          const label = KIND_LABELS_HI[landmark.kind] || landmark.kind || 'Jagah';
+          landmarkLine = `📍 ${landmark.name} (${label}) ke andar`;
         } else if (landmark) {
           const label = KIND_LABELS_HI[landmark.kind] || landmark.kind || 'Jagah';
           landmarkLine = `📍 ${landmark.name} (${label}) ke paas · ${formatDistance(landmark.distance)}`;
+        } else if (geo.specificArea) {
+          landmarkLine = `📍 ${geo.specificArea} ke area mein`;
         }
         return { address: geo.address, landmarkLine };
       });
