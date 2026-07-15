@@ -297,237 +297,141 @@
   let trails = {}; // deviceId -> { polyline, pointMarkers: [] }
   let deviceLabels = {}; // deviceId -> label, kept in sync for popups
 
-  // ---------- Reverse geocoding (OpenStreetMap Nominatim, free, no API key) ----------
-  // Simple cache (rounded coords) + a tiny request queue so we stay within
-  // Nominatim's fair-use rate limit (max ~1 request/second).
-  const addressCache = {};
-  let geocodeQueue = Promise.resolve();
-
-  function cacheKey(lat, lon) {
-    return lat.toFixed(4) + ',' + lon.toFixed(4);
-  }
-
-  function reverseGeocode(lat, lon) {
-    const key = cacheKey(lat, lon);
-    if (addressCache[key]) return Promise.resolve(addressCache[key]);
-
-    geocodeQueue = geocodeQueue.then(() => new Promise(resolve => setTimeout(resolve, 1000)));
-    return geocodeQueue.then(() =>
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&namedetails=1&extratags=1`, {
-        headers: { 'Accept-Language': 'en' }
-      })
-        .then(r => r.json())
-        .then(data => {
-          const address = data && data.display_name ? data.display_name : 'Address not found';
-          // If the point itself sits on/inside a named place (hotel, hospital, mall, etc.)
-          // Nominatim's own "name" + "type"/"class" fields already tell us that directly —
-          // no separate landmark lookup needed for this common case.
-          let directPlace = null;
-          if (data && data.name && data.address) {
-            const cls = data.class || '';
-            const typ = data.type || '';
-            const knownKinds = ['hospital','hotel','restaurant','school','college','university',
-              'mall','clinic','pharmacy','bank','park','stadium','place_of_worship','fuel',
-              'guest_house','hostel'];
-            if (knownKinds.includes(typ) || cls === 'amenity' || cls === 'tourism' || cls === 'shop') {
-              directPlace = { name: data.name, type: typ || cls };
-            }
-          }
-          // Build a short, specific "area" phrase from the address components —
-          // e.g. "Church Road, Katla Bazaar" instead of the full
-          // "Alwar, Alwar Tehsil, Alwar, Rajasthan, 300101, India" string.
-          // This is used as a fallback whenever no exact POI landmark is found,
-          // so the parent always sees *something* specific, not just a district name.
-          let specificArea = null;
-          const a = data && data.address;
-          if (a) {
-            const specific = a.road || a.pedestrian || a.residential || a.footway || a.house_number;
-            const area = a.neighbourhood || a.suburb || a.quarter || a.hamlet ||
-              a.village || a.town || a.city_district || a.borough || a.county;
-            const parts = [specific, area].filter(Boolean);
-            const uniqueParts = [...new Set(parts)];
-            if (uniqueParts.length) specificArea = uniqueParts.join(', ');
-          }
-          // Absolute last resort if even address components are sparse (rare, rural
-          // points): trim the full display_name down to its first 2 meaningful
-          // segments instead of showing the whole pincode+country string.
-          if (!specificArea && data && data.display_name) {
-            const segs = data.display_name.split(',').map(s => s.trim()).filter(Boolean);
-            if (segs.length) specificArea = segs.slice(0, 2).join(', ');
-          }
-          const result = { address, directPlace, specificArea };
-          addressCache[key] = result;
-          return result;
-        })
-        .catch(() => ({ address: 'Could not load address', directPlace: null, specificArea: null }))
-    );
-  }
-
-  // ---------- Nearby landmark lookup (Overpass API — free, no API key) ----------
-  // Finds the closest named hospital / hotel / restaurant / school / mall / etc.
-  // A single tight radius often finds nothing (e.g. a mall might be 400m-1.5km
-  // away, not 120m), so we search in widening rings and stop as soon as we
-  // find a named place. Last ring also accepts any named building as a fallback.
-  const landmarkCache = {};
-  const LANDMARK_KINDS = {
-    amenity: ['hospital', 'clinic', 'restaurant', 'cafe', 'school', 'college', 'university',
-      'bank', 'pharmacy', 'place_of_worship', 'police', 'fuel', 'fast_food', 'bar', 'cinema',
-      'marketplace', 'townhall', 'library', 'bus_station'],
-    tourism: ['hotel', 'guest_house', 'hostel', 'attraction', 'museum'],
-    shop: ['mall', 'supermarket', 'department_store'],
-    leisure: ['park', 'stadium', 'sports_centre'],
-    building: ['mall', 'commercial', 'retail', 'hospital', 'hotel']
+  // ---------- Location display ----------
+  // IMPORTANT: the backend already computes address + nearest landmark for
+  // every location ping (see server.js -> getAddressDetails) and saves it on
+  // the point as `point.address`. So the dashboard does NOT need to call
+  // Nominatim/Overpass itself for any point that came from the backend —
+  // it just reads the already-saved data. This is why it's now instant
+  // instead of waiting on several rounds of external API calls.
+  const KIND_LABELS_HI = {
+    hospital: 'Hospital', clinic: 'Clinic', restaurant: 'Restaurant', cafe: 'Cafe',
+    school: 'School', college: 'College', university: 'University', bank: 'Bank',
+    pharmacy: 'Pharmacy', place_of_worship: 'Dharmik sthal', police: 'Police Station',
+    fuel: 'Petrol Pump', atm: 'ATM', bus_station: 'Bus Station', railway_station: 'Railway Station',
+    hotel: 'Hotel', mall: 'Mall', shop: 'Shop'
   };
-  const SEARCH_RINGS = [40, 150, 400, 1000, 2500]; // meters, tried in order — first ring = "inside" check
-
-  function toRad(v) { return v * Math.PI / 180; }
-  function distanceMeters(lat1, lon1, lat2, lon2) {
-    const R = 6371000;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
 
   function formatDistance(m) {
     if (m >= 1000) return (m / 1000).toFixed(1) + ' km';
     return m + ' mtr';
   }
 
-  // Overpass also gets its own gentle rate-limit queue so we don't hammer the
-  // free public endpoint when several markers/points load at once.
-  let overpassQueue = Promise.resolve();
-
-  function queryOverpass(query) {
-    overpassQueue = overpassQueue.then(() => new Promise(resolve => setTimeout(resolve, 600)));
-    return overpassQueue.then(() =>
-      fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: 'data=' + encodeURIComponent(query)
-      }).then(r => r.json())
-    );
-  }
-
-  function bestNamedElement(elements, lat, lon) {
-    let best = null;
-    let bestDist = Infinity;
-    (elements || []).forEach(el => {
-      const name = el.tags && (el.tags.name || el.tags['name:en']);
-      if (!name) return; // skip unnamed places, not useful to a parent
-      const elLat = el.lat || (el.center && el.center.lat);
-      const elLon = el.lon || (el.center && el.center.lon);
-      if (elLat == null || elLon == null) return;
-      const dist = distanceMeters(lat, lon, elLat, elLon);
-      if (dist < bestDist) {
-        bestDist = dist;
-        const kind = el.tags.amenity || el.tags.tourism || el.tags.shop ||
-          el.tags.leisure || el.tags.building || '';
-        best = { name, kind, distance: Math.round(dist) };
+  // Builds { address, landmarkLine } straight from a stored point's
+  // `address` field — synchronous, no network calls, no waiting.
+  function buildLocationDisplay(point) {
+    if (!point) return { address: null, landmarkLine: null };
+    const addr = point.address || {};
+    const fullAddress = addr.formatted || null;
+    let landmarkLine = null;
+    if (addr.landmark && addr.landmark.name) {
+      const label = KIND_LABELS_HI[addr.landmark.kind] || addr.landmark.kind || 'Jagah';
+      if (addr.landmark.distanceMeters <= 40) {
+        landmarkLine = `📍 ${addr.landmark.name} (${label}) ke andar`;
+      } else {
+        landmarkLine = `📍 ${addr.landmark.name} (${label}) ke paas · ${formatDistance(addr.landmark.distanceMeters)}`;
       }
-    });
-    return best;
+    } else {
+      const parts = [addr.road, addr.area].filter(Boolean);
+      const uniqueParts = [...new Set(parts)];
+      if (uniqueParts.length) landmarkLine = `📍 ${uniqueParts.join(', ')} ke area mein`;
+    }
+    return { address: fullAddress, landmarkLine };
   }
 
-  // Tries each ring in order (40m "inside" check, then 150m/400m/1km/2.5km) and
-  // returns the nearest named landmark found in the first ring that has one.
-  function findNearbyLandmark(lat, lon, ringIndex = 0) {
-    if (ringIndex >= SEARCH_RINGS.length) return Promise.resolve(null);
-    const radius = SEARCH_RINGS[ringIndex];
-    const key = cacheKey(lat, lon) + ':' + radius;
-    if (landmarkCache[key] !== undefined) {
-      if (landmarkCache[key]) return Promise.resolve(landmarkCache[key]);
-      return findNearbyLandmark(lat, lon, ringIndex + 1);
-    }
+  // ---------- Fallback only ----------
+  // Used only for old points saved before the backend computed addresses
+  // (so point.address is missing). Goes through OUR OWN backend
+  // (/api/geocode) instead of calling Nominatim/Overpass directly from the
+  // browser - client-side calls to those free services are frequently
+  // throttled/ignored, which is what caused the long "Loading address..."
+  // stalls. The backend does the same lookup server-side, reliably.
+  const addressCache = {};
+  const pendingFallback = {}; // key -> in-flight Promise, avoids duplicate calls on every 15s poll
 
-    const filters = [];
-    for (const tag in LANDMARK_KINDS) {
-      const regex = LANDMARK_KINDS[tag].join('|');
-      filters.push(`node(around:${radius},${lat},${lon})[${tag}~"^(${regex})$"];`);
-      filters.push(`way(around:${radius},${lat},${lon})[${tag}~"^(${regex})$"];`);
-    }
-    const query = `[out:json][timeout:10];(${filters.join('')});out center 15;`;
+  function cacheKey(lat, lon) {
+    return lat.toFixed(4) + ',' + lon.toFixed(4);
+  }
 
-    return queryOverpass(query)
+  function fallbackReverseGeocode(lat, lon) {
+    const key = cacheKey(lat, lon);
+    if (addressCache[key]) return Promise.resolve(addressCache[key]);
+    if (pendingFallback[key]) return pendingFallback[key]; // already fetching this exact point
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // never hang more than 8s
+
+    const promise = fetch(`/api/geocode?lat=${lat}&lon=${lon}`, {
+      headers: authHeaders(),
+      signal: controller.signal
+    })
+      .then(r => r.json())
       .then(data => {
-        const best = bestNamedElement(data.elements, lat, lon);
-        if (best) best.inside = (ringIndex === 0); // found within the tight 40m ring
-        landmarkCache[key] = best;
-        if (best) return best;
-        return findNearbyLandmark(lat, lon, ringIndex + 1);
-      })
-      .catch(() => findNearbyLandmark(lat, lon, ringIndex + 1));
-  }
-
-  const KIND_LABELS_HI = {
-    hospital: 'Hospital', clinic: 'Clinic', restaurant: 'Restaurant', cafe: 'Cafe',
-    school: 'School', college: 'College', university: 'University', bank: 'Bank',
-    pharmacy: 'Pharmacy', place_of_worship: 'Dharmik sthal', police: 'Police Station',
-    fuel: 'Petrol Pump', fast_food: 'Fast Food', bar: 'Bar', cinema: 'Cinema',
-    marketplace: 'Market', townhall: 'Town Hall', library: 'Library', bus_station: 'Bus Station',
-    hotel: 'Hotel', guest_house: 'Guest House', hostel: 'Hostel',
-    attraction: 'Attraction', museum: 'Museum', mall: 'Mall', supermarket: 'Supermarket',
-    department_store: 'Store', park: 'Park', stadium: 'Stadium', sports_centre: 'Sports Centre',
-    commercial: 'Commercial Building', retail: 'Shopping Area'
-  };
-
-  // Combines Nominatim's address with the nearest named landmark so the UI
-  // always shows something specific and useful, in this priority order:
-  //   1. Point is directly inside a named place  → "Wonder Mall ke andar"
-  //   2. A named POI found within 40m (still "inside" for GPS accuracy) → "...ke andar"
-  //   3. A named POI found further away           → "Wonder Mall ke paas · 850 mtr"
-  //   4. No POI found anywhere within 2.5km        → "Church Road, Katla Bazaar ke area mein"
-  //   5. Nothing usable at all                     → no landmark line, just the raw address
-  function describeLocation(lat, lon) {
-    return Promise.all([reverseGeocode(lat, lon), findNearbyLandmark(lat, lon)])
-      .then(([geo, landmark]) => {
+        clearTimeout(timeoutId);
         let landmarkLine = null;
-        if (geo.directPlace) {
-          const label = KIND_LABELS_HI[geo.directPlace.type] || geo.directPlace.type;
-          landmarkLine = `📍 ${geo.directPlace.name} (${label}) ke andar`;
-        } else if (landmark && landmark.inside) {
-          const label = KIND_LABELS_HI[landmark.kind] || landmark.kind || 'Jagah';
-          landmarkLine = `📍 ${landmark.name} (${label}) ke andar`;
-        } else if (landmark) {
-          const label = KIND_LABELS_HI[landmark.kind] || landmark.kind || 'Jagah';
-          landmarkLine = `📍 ${landmark.name} (${label}) ke paas · ${formatDistance(landmark.distance)}`;
-        } else if (geo.specificArea) {
-          landmarkLine = `📍 ${geo.specificArea} ke area mein`;
+        if (data && data.landmark && data.landmark.name) {
+          const label = KIND_LABELS_HI[data.landmark.kind] || data.landmark.kind || 'Jagah';
+          landmarkLine = data.landmark.distanceMeters <= 40
+            ? `📍 ${data.landmark.name} (${label}) ke andar`
+            : `📍 ${data.landmark.name} (${label}) ke paas · ${formatDistance(data.landmark.distanceMeters)}`;
+        } else if (data) {
+          const parts = [data.road, data.area].filter(Boolean);
+          if (parts.length) landmarkLine = `📍 ${[...new Set(parts)].join(', ')} ke area mein`;
         }
-        return { address: geo.address, landmarkLine };
+        const result = {
+          address: (data && data.formatted) ? data.formatted : 'Address not found',
+          landmarkLine
+        };
+        addressCache[key] = result; // only cache on success, so a genuine failure can retry later
+        delete pendingFallback[key];
+        return result;
+      })
+      .catch(() => {
+        clearTimeout(timeoutId);
+        delete pendingFallback[key];
+        return { address: 'Address load nahi ho paya', landmarkLine: null };
       });
+
+    pendingFallback[key] = promise;
+    return promise;
   }
 
-  function buildPopupHtml(title, lat, lon, timestamp) {
-    const timeStr = timestamp ? new Date(timestamp).toLocaleString() : '';
+  // Main entry point used everywhere in the UI: instant if the point already
+  // has a saved address (the normal case), otherwise falls back to a single
+  // quick geocode call.
+  function describeLocation(point) {
+    if (!point) return Promise.resolve({ address: null, landmarkLine: null });
+    const display = buildLocationDisplay(point);
+    if (display.address) return Promise.resolve(display);
+    return fallbackReverseGeocode(point.latitude, point.longitude);
+  }
+
+  function buildPopupHtml(title, point) {
+    const timeStr = point.timestamp ? new Date(point.timestamp).toLocaleString() : '';
+    const { address, landmarkLine } = buildLocationDisplay(point);
     return `
       <div class="gx-popup">
         <div class="gx-popup-title">${title}</div>
-        <div class="gx-popup-landmark gx-popup-loading" id="landmark-${lat}-${lon}"></div>
-        <div class="gx-popup-address gx-popup-loading" id="addr-${lat}-${lon}">Loading address...</div>
+        ${landmarkLine ? `<div class="gx-popup-landmark">${escapeHtml(landmarkLine)}</div>` : ''}
+        <div class="gx-popup-address">${escapeHtml(address || 'Address load ho rahi hai...')}</div>
         ${timeStr ? `<div class="gx-popup-meta">🕒 ${timeStr}</div>` : ''}
-        <div class="gx-popup-meta">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+        <div class="gx-popup-meta">${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}</div>
       </div>
     `;
   }
 
-  function attachAddressPopup(layer, label, lat, lon, timestamp) {
-    layer.bindPopup(buildPopupHtml(label, lat, lon, timestamp));
-    layer.on('popupopen', () => {
-      describeLocation(lat, lon).then(({ address, landmarkLine }) => {
-        const addrEl = document.getElementById(`addr-${lat}-${lon}`);
-        if (addrEl) {
-          addrEl.innerText = address;
-          addrEl.classList.remove('gx-popup-loading');
-        }
-        const landmarkEl = document.getElementById(`landmark-${lat}-${lon}`);
-        if (landmarkEl) {
-          landmarkEl.classList.remove('gx-popup-loading');
-          landmarkEl.innerText = landmarkLine || '';
-          landmarkEl.style.display = landmarkLine ? 'block' : 'none';
-        }
+  function attachAddressPopup(layer, label, point) {
+    layer.bindPopup(buildPopupHtml(label, point));
+    // Only needed as a fallback for old points without a saved address —
+    // normal points render instantly above and this does nothing extra.
+    if (!point.address || !point.address.formatted) {
+      layer.on('popupopen', () => {
+        describeLocation(point).then(({ address, landmarkLine }) => {
+          layer.setPopupContent(buildPopupHtml(label, { ...point, address: { formatted: address } }) +
+            (landmarkLine ? '' : ''));
+        });
       });
-    });
+    }
   }
 
   async function doLogin() {
@@ -635,6 +539,19 @@
       const lastSeenStr = d.lastSeen ? timeAgo(d.lastSeen) : 'Kabhi nahi';
       const locationOff = d.locationEnabled === false;
 
+      const nowDisplay = buildLocationDisplay(d.lastLocation);
+      const prevDisplay = buildLocationDisplay(d.previousLocation);
+      const nowHtml = d.lastLocation
+        ? (nowDisplay.address
+            ? (nowDisplay.landmarkLine ? `<span class="landmark-tag">${escapeHtml(nowDisplay.landmarkLine)}</span><br/>` : '') + escapeHtml(nowDisplay.address)
+            : 'Loading address...')
+        : 'Abhi tak koi location nahi';
+      const prevHtml = d.previousLocation
+        ? (prevDisplay.address
+            ? (prevDisplay.landmarkLine ? `<span class="landmark-tag">${escapeHtml(prevDisplay.landmarkLine)}</span><br/>` : '') + escapeHtml(prevDisplay.address)
+            : 'Loading address...')
+        : '—';
+
       const card = document.createElement('div');
       card.className = 'device-card';
       card.innerHTML = `
@@ -642,8 +559,8 @@
           <div>
             <h3>${escapeHtml(d.deviceLabel)}</h3>
             <p><span class="device-status-dot ${isOnline ? 'online' : ''}"></span>${isOnline ? 'Active' : 'Last seen: ' + lastSeenStr}</p>
-            <div class="device-location-line"><span class="lbl">📍 Ab yahan:</span> <span id="addr-now-${d.deviceId}">${d.lastLocation ? 'Loading address...' : 'Abhi tak koi location nahi'}</span></div>
-            <div class="device-location-line"><span class="lbl">🕓 Pehle yahan tha:</span> <span id="addr-prev-${d.deviceId}">${d.previousLocation ? 'Loading address...' : '—'}</span></div>
+            <div class="device-location-line"><span class="lbl">📍 Ab yahan:</span> <span id="addr-now-${d.deviceId}">${nowHtml}</span></div>
+            <div class="device-location-line"><span class="lbl">🕓 Pehle yahan tha:</span> <span id="addr-prev-${d.deviceId}">${prevHtml}</span></div>
             ${locationOff ? '<div class="device-warning">⚠️ Location band hai is device par — aakhri maloom jagah upar dikh rahi hai.</div>' : ''}
           </div>
         </div>
@@ -655,20 +572,17 @@
       `;
       listEl.appendChild(card);
 
-      if (d.lastLocation) {
-        describeLocation(d.lastLocation.latitude, d.lastLocation.longitude).then(({ address, landmarkLine }) => {
+      // Fallback: only for old points saved before the backend computed addresses.
+      if (d.lastLocation && !nowDisplay.address) {
+        describeLocation(d.lastLocation).then(({ address, landmarkLine }) => {
           const el = document.getElementById('addr-now-' + d.deviceId);
-          if (el) {
-            el.innerHTML = (landmarkLine ? `<span class="landmark-tag">${escapeHtml(landmarkLine)}</span><br/>` : '') + escapeHtml(address);
-          }
+          if (el) el.innerHTML = (landmarkLine ? `<span class="landmark-tag">${escapeHtml(landmarkLine)}</span><br/>` : '') + escapeHtml(address);
         });
       }
-      if (d.previousLocation) {
-        describeLocation(d.previousLocation.latitude, d.previousLocation.longitude).then(({ address, landmarkLine }) => {
+      if (d.previousLocation && !prevDisplay.address) {
+        describeLocation(d.previousLocation).then(({ address, landmarkLine }) => {
           const el = document.getElementById('addr-prev-' + d.deviceId);
-          if (el) {
-            el.innerHTML = (landmarkLine ? `<span class="landmark-tag">${escapeHtml(landmarkLine)}</span><br/>` : '') + escapeHtml(address);
-          }
+          if (el) el.innerHTML = (landmarkLine ? `<span class="landmark-tag">${escapeHtml(landmarkLine)}</span><br/>` : '') + escapeHtml(address);
         });
       }
 
@@ -679,13 +593,7 @@
         } else {
           markers[d.deviceId] = L.marker(pos).addTo(map);
         }
-        attachAddressPopup(
-          markers[d.deviceId],
-          '📍 ' + d.deviceLabel,
-          d.lastLocation.latitude,
-          d.lastLocation.longitude,
-          d.lastLocation.timestamp
-        );
+        attachAddressPopup(markers[d.deviceId], '📍 ' + d.deviceLabel, d.lastLocation);
       }
     });
   }
@@ -753,7 +661,7 @@
         fillOpacity: 0.9,
         weight: 2,
       }).addTo(map);
-      attachAddressPopup(circle, `${label} · point ${i + 1}/${history.length}`, p.latitude, p.longitude, p.timestamp);
+      attachAddressPopup(circle, `${label} · point ${i + 1}/${history.length}`, p);
       return circle;
     });
 
