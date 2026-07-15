@@ -343,15 +343,20 @@
 
   // ---------- Nearby landmark lookup (Overpass API — free, no API key) ----------
   // Finds the closest named hospital / hotel / restaurant / school / mall / etc.
-  // within ~120 meters of a point, so a parent can tell at a glance "ye XYZ Hospital
-  // ke paas hai" instead of just a road name.
+  // A single tight radius often finds nothing (e.g. a mall might be 400m-1.5km
+  // away, not 120m), so we search in widening rings and stop as soon as we
+  // find a named place. Last ring also accepts any named building as a fallback.
   const landmarkCache = {};
   const LANDMARK_KINDS = {
     amenity: ['hospital', 'clinic', 'restaurant', 'cafe', 'school', 'college', 'university',
-      'bank', 'pharmacy', 'place_of_worship', 'police', 'fuel', 'fast_food', 'bar', 'cinema'],
-    tourism: ['hotel', 'guest_house', 'hostel', 'attraction', 'mall'],
-    shop: ['mall', 'supermarket', 'department_store']
+      'bank', 'pharmacy', 'place_of_worship', 'police', 'fuel', 'fast_food', 'bar', 'cinema',
+      'marketplace', 'townhall', 'library', 'bus_station'],
+    tourism: ['hotel', 'guest_house', 'hostel', 'attraction', 'museum'],
+    shop: ['mall', 'supermarket', 'department_store'],
+    leisure: ['park', 'stadium', 'sports_centre'],
+    building: ['mall', 'commercial', 'retail', 'hospital', 'hotel']
   };
+  const SEARCH_RINGS = [150, 400, 1000, 2000]; // meters, tried in order
 
   function toRad(v) { return v * Math.PI / 180; }
   function distanceMeters(lat1, lon1, lat2, lon2) {
@@ -363,13 +368,55 @@
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
+  function formatDistance(m) {
+    if (m >= 1000) return (m / 1000).toFixed(1) + ' km';
+    return m + ' mtr';
+  }
+
   // Overpass also gets its own gentle rate-limit queue so we don't hammer the
   // free public endpoint when several markers/points load at once.
   let overpassQueue = Promise.resolve();
 
-  function findNearbyLandmark(lat, lon, radius = 120) {
+  function queryOverpass(query) {
+    overpassQueue = overpassQueue.then(() => new Promise(resolve => setTimeout(resolve, 600)));
+    return overpassQueue.then(() =>
+      fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(query)
+      }).then(r => r.json())
+    );
+  }
+
+  function bestNamedElement(elements, lat, lon) {
+    let best = null;
+    let bestDist = Infinity;
+    (elements || []).forEach(el => {
+      const name = el.tags && (el.tags.name || el.tags['name:en']);
+      if (!name) return; // skip unnamed places, not useful to a parent
+      const elLat = el.lat || (el.center && el.center.lat);
+      const elLon = el.lon || (el.center && el.center.lon);
+      if (elLat == null || elLon == null) return;
+      const dist = distanceMeters(lat, lon, elLat, elLon);
+      if (dist < bestDist) {
+        bestDist = dist;
+        const kind = el.tags.amenity || el.tags.tourism || el.tags.shop ||
+          el.tags.leisure || el.tags.building || '';
+        best = { name, kind, distance: Math.round(dist) };
+      }
+    });
+    return best;
+  }
+
+  // Tries each ring in order (150m, 400m, 1km, 2km) and returns the nearest
+  // named landmark found in the first ring that has one.
+  function findNearbyLandmark(lat, lon, ringIndex = 0) {
+    if (ringIndex >= SEARCH_RINGS.length) return Promise.resolve(null);
+    const radius = SEARCH_RINGS[ringIndex];
     const key = cacheKey(lat, lon) + ':' + radius;
-    if (landmarkCache[key] !== undefined) return Promise.resolve(landmarkCache[key]);
+    if (landmarkCache[key] !== undefined) {
+      if (landmarkCache[key]) return Promise.resolve(landmarkCache[key]);
+      return findNearbyLandmark(lat, lon, ringIndex + 1);
+    }
 
     const filters = [];
     for (const tag in LANDMARK_KINDS) {
@@ -377,40 +424,16 @@
       filters.push(`node(around:${radius},${lat},${lon})[${tag}~"^(${regex})$"];`);
       filters.push(`way(around:${radius},${lat},${lon})[${tag}~"^(${regex})$"];`);
     }
-    const query = `[out:json][timeout:8];(${filters.join('')});out center 10;`;
+    const query = `[out:json][timeout:10];(${filters.join('')});out center 15;`;
 
-    overpassQueue = overpassQueue.then(() => new Promise(resolve => setTimeout(resolve, 600)));
-    return overpassQueue.then(() =>
-      fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: 'data=' + encodeURIComponent(query)
+    return queryOverpass(query)
+      .then(data => {
+        const best = bestNamedElement(data.elements, lat, lon);
+        landmarkCache[key] = best;
+        if (best) return best;
+        return findNearbyLandmark(lat, lon, ringIndex + 1);
       })
-        .then(r => r.json())
-        .then(data => {
-          if (!data.elements || data.elements.length === 0) {
-            landmarkCache[key] = null;
-            return null;
-          }
-          let best = null;
-          let bestDist = Infinity;
-          data.elements.forEach(el => {
-            const name = el.tags && (el.tags.name || el.tags['name:en']);
-            if (!name) return; // skip unnamed places, not useful to a parent
-            const elLat = el.lat || (el.center && el.center.lat);
-            const elLon = el.lon || (el.center && el.center.lon);
-            if (elLat == null || elLon == null) return;
-            const dist = distanceMeters(lat, lon, elLat, elLon);
-            if (dist < bestDist) {
-              bestDist = dist;
-              const kind = el.tags.amenity || el.tags.tourism || el.tags.shop || '';
-              best = { name, kind, distance: Math.round(dist) };
-            }
-          });
-          landmarkCache[key] = best;
-          return best;
-        })
-        .catch(() => null)
-    );
+      .catch(() => findNearbyLandmark(lat, lon, ringIndex + 1));
   }
 
   const KIND_LABELS_HI = {
@@ -418,13 +441,15 @@
     school: 'School', college: 'College', university: 'University', bank: 'Bank',
     pharmacy: 'Pharmacy', place_of_worship: 'Dharmik sthal', police: 'Police Station',
     fuel: 'Petrol Pump', fast_food: 'Fast Food', bar: 'Bar', cinema: 'Cinema',
+    marketplace: 'Market', townhall: 'Town Hall', library: 'Library', bus_station: 'Bus Station',
     hotel: 'Hotel', guest_house: 'Guest House', hostel: 'Hostel',
-    attraction: 'Attraction', mall: 'Mall', supermarket: 'Supermarket',
-    department_store: 'Store'
+    attraction: 'Attraction', museum: 'Museum', mall: 'Mall', supermarket: 'Supermarket',
+    department_store: 'Store', park: 'Park', stadium: 'Stadium', sports_centre: 'Sports Centre',
+    commercial: 'Commercial Building', retail: 'Shopping Area'
   };
 
   // Combines Nominatim's address with the nearest named landmark so the UI can
-  // show something like: "🏨 Hotel Sunrise ke paas (35 mtr) · Road: MG Road, ..."
+  // show something like: "🏬 Wonder Mall ke paas · 850 mtr · Road: MG Road, ..."
   function describeLocation(lat, lon) {
     return Promise.all([reverseGeocode(lat, lon), findNearbyLandmark(lat, lon)])
       .then(([geo, landmark]) => {
@@ -434,7 +459,7 @@
           landmarkLine = `📍 ${geo.directPlace.name} (${label}) ke andar`;
         } else if (landmark) {
           const label = KIND_LABELS_HI[landmark.kind] || landmark.kind || 'Jagah';
-          landmarkLine = `📍 ${landmark.name} (${label}) ke paas · ${landmark.distance} mtr`;
+          landmarkLine = `📍 ${landmark.name} (${label}) ke paas · ${formatDistance(landmark.distance)}`;
         }
         return { address: geo.address, landmarkLine };
       });
