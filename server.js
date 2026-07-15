@@ -10,6 +10,7 @@
  *   POST /api/location            -> child app sends a location ping (needs deviceToken)
  *   GET  /api/devices             -> parent dashboard: list of paired devices (needs dashboard password)
  *   GET  /api/devices/:id/history -> parent dashboard: location history of one device
+ *                                     (rolling 24h window by default - see ?hours= below)
  *   PATCH /api/devices/:id        -> rename a device
  *   DELETE /api/devices/:id       -> remove a device + its history
  *   GET  /                        -> live map dashboard (open in browser)
@@ -239,11 +240,21 @@ app.get("/api/devices", requireDashboardAuth, async (req, res) => {
 });
 
 // ---------- 5. Parent dashboard: history of one device ----------
+// Returns a rolling window of location points - by default just the last
+// 24 hours, so the path the dashboard draws always reflects "today" and
+// naturally refreshes as older points age out (no manual cleanup needed).
+// Pass ?hours=48 (etc.) to widen the window if a longer trail is ever needed.
 app.get("/api/devices/:id/history", requireDashboardAuth, async (req, res) => {
   try {
     const device = await devices.findOne({ _id: req.params.id });
     if (!device) return res.status(404).json({ error: "Not found" });
-    res.json(device.history || []);
+
+    const hours = Math.max(1, parseInt(req.query.hours, 10) || 24);
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
+    const fullHistory = device.history || [];
+    const recent = fullHistory.filter((p) => p.timestamp >= cutoff);
+
+    res.json(recent);
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Server error" });
